@@ -1,5 +1,7 @@
 # C5: KYC Fraud Detection System
 
+This repo contains a system for the eSewa hackathon.
+
 Detects forged documents, duplicate identities, and suspicious onboarding behavior during digital KYC.
 
 ## Project Description
@@ -8,7 +10,7 @@ eKS (eSewa KYC Shield) runs document forensics, identity deduplication, and beha
 
 ## Project Members
 
-- Dikshant Chapagain - Backend / AI Developer
+- Dikshanta Chapagain - Backend / AI Developer
 - Pawan Acharya - Frontend
 - Pratik Joshi - Backend
 - Eshika Sharma - System Design
