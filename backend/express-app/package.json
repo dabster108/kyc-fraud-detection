@@ -1,10 +1,11 @@
 {
   "name": "express-app",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "KYC Fraud Detection Backend",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -18,7 +19,8 @@
     "helmet": "^8.2.0",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
