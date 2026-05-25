@@ -155,27 +155,66 @@ class MistralOCRService:
             "full_name": None,
             "date_of_birth": None,
             "document_number": None,
+            "issue_date": None,
             "expiry_date": None,
             "address": None,
+            "nationality": None,
+            "document_category": None,
         }
 
         normalized = " ".join(raw_text.split())
-        name_match = re.search(r"Name[:\s]+([A-Z][A-Za-z\s'-]{2,})", normalized, re.IGNORECASE)
-        dob_match = re.search(r"(DOB|Date of Birth)[:\s]+([0-9]{2,4}[-/][0-9]{2}[-/][0-9]{2,4})", normalized, re.IGNORECASE)
-        doc_match = re.search(r"(ID|Document|Passport|License)[^A-Z0-9]{0,6}([A-Z0-9-]{6,})", normalized, re.IGNORECASE)
-        exp_match = re.search(r"(Expiry|Expiration)[:\s]+([0-9]{2,4}[-/][0-9]{2}[-/][0-9]{2,4})", normalized, re.IGNORECASE)
-        addr_match = re.search(r"Address[:\s]+(.+)$", normalized, re.IGNORECASE)
+        name_match = re.search(r"(Full Name|Name)[:\s]+([A-Z][A-Za-z\s'-]{2,})", normalized, re.IGNORECASE)
+        given_match = re.search(r"(Given Name|First Name)[:\s]+([A-Z][A-Za-z\s'-]{1,})", normalized, re.IGNORECASE)
+        surname_match = re.search(r"(Surname|Last Name|Family Name)[:\s]+([A-Z][A-Za-z\s'-]{1,})", normalized, re.IGNORECASE)
 
-        if name_match:
-            fields["full_name"] = name_match.group(1).strip()
+        date_pattern = r"([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})"
+        dob_match = re.search(rf"(DOB|Date of Birth|Birth Date)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
+        issue_match = re.search(rf"(Date of Issue|Issue Date|Issued)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
+        exp_match = re.search(rf"(Expiry|Expiration|Valid Until|Date of Expiry)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
+
+        doc_number_patterns = [
+            (r"(Passport\s*(No\.?|Number))[:\s]+([A-Z0-9-]{5,})", 3),
+            (r"(Citizenship\s*(No\.?|Number|Certificate\s*No\.?))[:\s]+([A-Z0-9-]{5,})", 3),
+            (r"((Driving|Driver'?s)?\s*Licen[cs]e|DL)\s*(No\.?|Number)[:\s]+([A-Z0-9-]{5,})", 4),
+            (r"(ID|Document|Passport|License|Licence)[^A-Z0-9]{0,6}([A-Z0-9-]{6,})", 2),
+        ]
+
+        addr_match = re.search(r"(Address|Permanent Address)[:\s]+(.+)$", normalized, re.IGNORECASE)
+        nationality_match = re.search(r"Nationality[:\s]+([A-Z][A-Za-z\s'-]{2,})", normalized, re.IGNORECASE)
+
+        document_category = None
+        if re.search(r"\bpassport\b", normalized, re.IGNORECASE):
+            document_category = "passport"
+        elif re.search(r"\bcitizenship\b", normalized, re.IGNORECASE):
+            document_category = "citizenship"
+        elif re.search(r"\b(driver'?s|driving|dl)\b", normalized, re.IGNORECASE):
+            document_category = "driver_license"
+
+        doc_match = None
+        for pattern, group_idx in doc_number_patterns:
+            match = re.search(pattern, normalized, re.IGNORECASE)
+            if match:
+                doc_match = (match, group_idx)
+                break
+
+        if given_match and surname_match:
+            fields["full_name"] = f"{given_match.group(2).strip()} {surname_match.group(2).strip()}"
+        elif name_match:
+            fields["full_name"] = name_match.group(2).strip()
         if dob_match:
             fields["date_of_birth"] = dob_match.group(2).strip()
+        if issue_match:
+            fields["issue_date"] = issue_match.group(2).strip()
         if doc_match:
-            fields["document_number"] = doc_match.group(2).strip()
+            fields["document_number"] = doc_match[0].group(doc_match[1]).strip()
         if exp_match:
             fields["expiry_date"] = exp_match.group(2).strip()
         if addr_match:
-            fields["address"] = addr_match.group(1).strip()
+            fields["address"] = addr_match.group(2).strip()
+        if nationality_match:
+            fields["nationality"] = nationality_match.group(1).strip()
+        if document_category:
+            fields["document_category"] = document_category
 
         return fields
 
