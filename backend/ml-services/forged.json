@@ -60,5 +60,35 @@
       "noise_std": 4.847018830768647,
       "suspicious_region_count": 0
     }
+  },
+  {
+    "id": "d96910dc-d98b-4030-9522-5d70994be102",
+    "timestamp": "2026-05-29T10:18:14.812261+00:00",
+    "engine_used": "mistral",
+    "document_type": "nid",
+    "extracted_fields": {
+      "nin": "023-456-2130",
+      "surname_nepali": "कोइराला पोखरेल",
+      "surname_english": "Koirala Pokhrel",
+      "given_name_nepali": "भगवती कुमारी",
+      "given_name_english": "Bhagawati Kumari",
+      "full_name_nepali": "भगवती कुमारी कोइराला पोखरेल",
+      "full_name_english": "Bhagawati Kumari Koirala Pokhrel",
+      "gender": "female",
+      "date_of_birth_ad": "1978-02-05",
+      "date_of_birth_bs": "2034-10-23",
+      "nationality": "Nepalese",
+      "date_of_issue": "01-01-2017",
+      "mobile_number": null
+    },
+    "photo_region": [
+      665,
+      0,
+      1024,
+      455
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 3707,
+    "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"surname_nepali\": \"कोइराला पोखरेल\",\n  \"surname_english\": \"Koirala Pokhrel\",\n  \"given_name_nepali\": \"भगवती कुमारी\",\n  \"given_name_english\": \"Bhagawati Kumari\",\n  \"full_name_nepali\": \"भगवती कुमारी कोइराला पोखरेल\",\n  \"full_name_english\": \"Bhagawati Kumari Koirala Pokhrel\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
   }
 ]

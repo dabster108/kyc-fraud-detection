@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.models.ocr_models import OCRResult
 from app.services import mistral_ocr
+from app.database import supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +123,34 @@ def _append_to_forged_json(result: OCRResult) -> None:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
+def _save_to_supabase(result: OCRResult, record_id: str) -> None:
+    """Insert an OCR result into the ``extract_unofficial`` Supabase table.
+
+    Non-fatal: called from a try/except so a Supabase failure never breaks
+    the API response.
+    """
+    client = supabase_client.supabase
+    if client is None:
+        raise RuntimeError("Supabase client not configured")
+
+    client.table("extract_unofficial").insert(
+        {
+            "id": record_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "engine_used": _ENGINE,
+            "document_type": result.document_type,
+            "extracted_fields": result.extracted_fields,
+            "photo_region": result.photo_region,
+            "thumbnail_region": result.thumbnail_region,
+            "confidence_score": result.confidence_score,
+            "processing_time_ms": result.processing_time_ms,
+            "raw_text": result.raw_text,
+        }
+    ).execute()
+
+
 async def _process_and_store(image_bytes: bytes) -> OCRResponse:
-    """Run Mistral OCR extraction and persist the result to ``forged.json``."""
+    """Run Mistral OCR extraction and persist the result to Supabase + forged.json."""
     try:
         result = await mistral_ocr.extract_document(image_bytes)
     except Exception as exc:  # noqa: BLE001 - surface as a 500 with detail
@@ -133,10 +160,17 @@ async def _process_and_store(image_bytes: bytes) -> OCRResponse:
             detail=f"OCR processing failed: {exc}",
         ) from exc
 
+    record_id = str(uuid.uuid4())
+
     try:
         _append_to_forged_json(result)
     except Exception:  # noqa: BLE001 - persistence must not fail the request
         logger.exception("Failed to append result to forged.json")
+
+    try:
+        _save_to_supabase(result, record_id)
+    except Exception:  # noqa: BLE001 - Supabase failure must not fail the request
+        logger.exception("Failed to save OCR result to Supabase extract_unofficial")
 
     return OCRResponse(engine_used=_ENGINE, **result.model_dump())
 
