@@ -68,7 +68,7 @@ async def extract(
         )
 
     try:
-        return await face_extractor.extract_and_save_face(
+        result = await face_extractor.extract_and_save_face(
             image_bytes, submission_id
         )
     except Exception as exc:  # noqa: BLE001 - safety net; service is resilient
@@ -77,3 +77,17 @@ async def extract(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Face extraction failed: {exc}",
         ) from exc
+
+    if result.is_duplicate and result.duplicate_match is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "duplicate_face_detected",
+                "message": "This face already exists in the system.",
+                "matched_submission_id": result.duplicate_match.matched_submission_id,
+                "similarity_score": result.duplicate_match.similarity_score,
+                "matched_at": result.duplicate_match.matched_at,
+            },
+        )
+
+    return result

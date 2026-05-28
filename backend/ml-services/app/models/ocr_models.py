@@ -52,7 +52,6 @@ class ForgeryResult(BaseModel):
     Attributes:
         forgery_score: Overall forgery score (0-100).
         decision: Classification based on score thresholds.
-        ela_heatmap_b64: Base64-encoded PNG of the ELA heatmap.
         suspicious_regions: List of bounding boxes for suspicious areas.
         edge_consistency_score: Score from edge consistency analysis (0-100).
         noise_score: Score from noise pattern analysis (0-100).
@@ -65,9 +64,6 @@ class ForgeryResult(BaseModel):
     )
     decision: Literal["genuine", "suspicious", "forged"] = Field(
         ..., description="Classification based on score."
-    )
-    ela_heatmap_b64: str = Field(
-        ..., description="Base64-encoded PNG of ELA heatmap."
     )
     suspicious_regions: List[List[int]] = Field(
         default_factory=list,

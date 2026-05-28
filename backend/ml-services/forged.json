@@ -90,5 +90,73 @@
     "confidence_score": 0.9,
     "processing_time_ms": 3707,
     "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"surname_nepali\": \"कोइराला पोखरेल\",\n  \"surname_english\": \"Koirala Pokhrel\",\n  \"given_name_nepali\": \"भगवती कुमारी\",\n  \"given_name_english\": \"Bhagawati Kumari\",\n  \"full_name_nepali\": \"भगवती कुमारी कोइराला पोखरेल\",\n  \"full_name_english\": \"Bhagawati Kumari Koirala Pokhrel\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
+  },
+  {
+    "id": "526c633c-b397-4a40-a849-96ea677ab267",
+    "timestamp": "2026-05-29T10:42:42.422174+00:00",
+    "service": "forgery",
+    "forgery_score": 33.32812770605554,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 63,
+    "details": {
+      "ela_score": 6.656255412111081,
+      "ela_mean_brightness": 5.657817100294419,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.847018830768647,
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "17febb56-e594-46bb-a84d-a3412e9584f9",
+    "timestamp": "2026-05-29T10:45:49.388015+00:00",
+    "engine_used": "mistral",
+    "document_type": "nid",
+    "extracted_fields": {
+      "nin": "023-456-2130",
+      "surname_nepali": "कोइराला पोखरेल",
+      "surname_english": "Koirala Pokhrel",
+      "given_name_nepali": "भगवती कुमारी",
+      "given_name_english": "Bhagawati Kumari",
+      "full_name_nepali": "भगवती कुमारी कोइराला पोखरेल",
+      "full_name_english": "Bhagawati Kumari Koirala Pokhrel",
+      "gender": "female",
+      "date_of_birth_ad": "1978-02-05",
+      "date_of_birth_bs": "2034-10-23",
+      "nationality": "Nepalese",
+      "date_of_issue": "01-01-2017",
+      "mobile_number": null
+    },
+    "photo_region": [
+      665,
+      0,
+      1024,
+      455
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 3216,
+    "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"surname_nepali\": \"कोइराला पोखरेल\",\n  \"surname_english\": \"Koirala Pokhrel\",\n  \"given_name_nepali\": \"भगवती कुमारी\",\n  \"given_name_english\": \"Bhagawati Kumari\",\n  \"full_name_nepali\": \"भगवती कुमारी कोइराला पोखरेल\",\n  \"full_name_english\": \"Bhagawati Kumari Koirala Pokhrel\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
+  },
+  {
+    "id": "832f2c00-ffb3-463e-94e7-1f5a23b4a153",
+    "timestamp": "2026-05-29T10:46:18.367959+00:00",
+    "service": "forgery",
+    "forgery_score": 33.32812770605554,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 23,
+    "details": {
+      "ela_score": 6.656255412111081,
+      "ela_mean_brightness": 5.657817100294419,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.847018830768647,
+      "suspicious_region_count": 0
+    }
   }
 ]

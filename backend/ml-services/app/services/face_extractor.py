@@ -107,14 +107,56 @@ def _to_vector_literal(embedding: np.ndarray) -> str:
     return "[" + ",".join(str(float(v)) for v in embedding.tolist()) + "]"
 
 
+async def _find_duplicate_via_supabase(
+    embedding: np.ndarray,
+) -> Optional[DuplicateMatch]:
+    """Supabase REST fallback for duplicate detection via the
+    ``match_face_embeddings`` RPC function (see migration 002).
+
+    Used when the asyncpg pool is not available (e.g. ``DATABASE_URL`` not
+    set).  Returns ``None`` on any error so the caller can treat it as "no
+    duplicate found".
+    """
+    client = supabase_client.supabase
+    if client is None:
+        logger.warning("Supabase client not configured; cannot run RPC fallback.")
+        return None
+
+    vector_list = embedding.tolist()
+    try:
+        response = client.rpc(
+            "match_face_embeddings",
+            {
+                "query_embedding": vector_list,
+                "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                "match_count": 1,
+            },
+        ).execute()
+    except Exception:  # noqa: BLE001
+        logger.exception("Supabase RPC duplicate detection failed")
+        return None
+
+    rows = response.data or []
+    if not rows:
+        return None
+
+    row = rows[0]
+    return DuplicateMatch(
+        matched_submission_id=str(row["submission_id"]),
+        similarity_score=round(float(row["similarity"]), 4),
+        matched_at=str(row["created_at"]),
+    )
+
+
 async def _find_duplicate(
     embedding: np.ndarray,
 ) -> Optional[DuplicateMatch]:
     """Search for the nearest stored face via pgvector cosine similarity.
 
-    Returns a :class:`DuplicateMatch` when a face exceeds the configured
-    similarity threshold, otherwise ``None``. Any error (including an
-    uninitialised pool) is swallowed and treated as "no duplicate".
+    Tries the asyncpg pool first (raw SQL, faster).  Falls back to the
+    Supabase REST RPC when the pool is unavailable (e.g. ``DATABASE_URL`` not
+    configured).  Returns ``None`` when no match exceeds the threshold or on
+    any unrecoverable error.
     """
     vector_literal = _to_vector_literal(embedding)
     query = """
@@ -129,11 +171,13 @@ async def _find_duplicate(
         async with pool.acquire() as conn:
             row = await conn.fetchrow(query, vector_literal)
     except RuntimeError:
-        logger.warning("DB pool unavailable; skipping duplicate detection.")
-        return None
-    except Exception:  # noqa: BLE001 - duplicate check must never crash
-        logger.exception("Duplicate detection query failed")
-        return None
+        logger.warning(
+            "DB pool unavailable; falling back to Supabase RPC for duplicate detection."
+        )
+        return await _find_duplicate_via_supabase(embedding)
+    except Exception:  # noqa: BLE001 - try the fallback rather than giving up
+        logger.exception("asyncpg duplicate detection failed; trying Supabase RPC")
+        return await _find_duplicate_via_supabase(embedding)
 
     if row is None:
         return None

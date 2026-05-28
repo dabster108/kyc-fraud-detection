@@ -9,7 +9,6 @@ Implements a multi-check forgery detection pipeline:
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 from io import BytesIO
 from time import perf_counter
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 def _sync_analyze(image_bytes: bytes) -> Tuple[
     float,  # forgery_score
     str,  # decision
-    str,  # ela_heatmap_b64
     List[List[int]],  # suspicious_regions
     float,  # edge_consistency_score
     float,  # noise_score
@@ -72,11 +70,6 @@ def _sync_analyze(image_bytes: bytes) -> Tuple[
         if area > 500:
             x, y, w, h = cv2.boundingRect(contour)
             suspicious_regions.append([int(x), int(y), int(w), int(h)])
-
-    # Save ELA heatmap as base64 PNG
-    ela_buffer = BytesIO()
-    amplified.save(ela_buffer, format="PNG")
-    ela_heatmap_b64 = base64.b64encode(ela_buffer.getvalue()).decode("utf-8")
 
     # CHECK 2: Edge Consistency - 30% weight
     original_np = np.array(original_pil)
@@ -137,7 +130,6 @@ def _sync_analyze(image_bytes: bytes) -> Tuple[
     return (
         forgery_score,
         decision,
-        ela_heatmap_b64,
         suspicious_regions,
         edge_inconsistency_score,
         noise_score,
@@ -154,7 +146,7 @@ async def analyze_forgery(image_bytes: bytes) -> ForgeryResult:
         image_bytes: Raw image bytes (JPEG/PNG/WEBP).
 
     Returns:
-        ForgeryResult with score, decision, heatmap, and analysis details.
+        ForgeryResult with score, decision, and analysis details.
     """
     start_time = perf_counter()
 
@@ -162,7 +154,6 @@ async def analyze_forgery(image_bytes: bytes) -> ForgeryResult:
     (
         forgery_score,
         decision,
-        ela_heatmap_b64,
         suspicious_regions,
         edge_consistency_score,
         noise_score,
@@ -174,7 +165,6 @@ async def analyze_forgery(image_bytes: bytes) -> ForgeryResult:
     return ForgeryResult(
         forgery_score=forgery_score,
         decision=decision,
-        ela_heatmap_b64=ela_heatmap_b64,
         suspicious_regions=suspicious_regions,
         edge_consistency_score=edge_consistency_score,
         noise_score=noise_score,
