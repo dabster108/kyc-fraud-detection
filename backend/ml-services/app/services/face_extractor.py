@@ -1,0 +1,337 @@
+"""Face extraction, embedding, duplicate detection and persistence service.
+
+Pipeline (all heavy/synchronous work is dispatched to the default executor):
+1. Upload the original ID image to Cloudinary.
+2. Detect faces with InsightFace (``buffalo_l``).
+3. Pick the highest-confidence face, crop it (with padding) and upload it.
+4. Look for near-duplicate faces via pgvector cosine similarity.
+5. Persist the submission and the face embedding to Supabase.
+
+The InsightFace model is initialised once at module import as a singleton.
+Every failure mode is caught so the public coroutine never raises; problems are
+reported through :class:`FaceExtractionResult` fields instead.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from time import perf_counter
+from typing import List, Optional, Tuple
+
+import re
+import cv2
+import numpy as np
+from insightface.app import FaceAnalysis
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+from app.core.config import settings
+from app.models.face_models import (
+    DuplicateMatch,
+    FaceExtractionResult,
+    FaceRegion,
+)
+from app.services import cloudinary_service
+from app.database import supabase_client
+
+logger = logging.getLogger(__name__)
+
+# Singleton face analysis model, initialised once at import time.
+face_app = FaceAnalysis(
+    name=settings.FACE_MODEL_NAME, providers=["CPUExecutionProvider"]
+)
+face_app.prepare(ctx_id=-1, det_size=(640, 640))
+
+# Pixels of padding added around the detected face before cropping.
+_CROP_PADDING = 10
+
+
+def _detect(img_bytes: bytes) -> Tuple[list, Optional[np.ndarray]]:
+    """Decode image bytes and run InsightFace detection (sync, for executor).
+
+    Args:
+        img_bytes: Raw image bytes.
+
+    Returns:
+        A tuple of ``(faces, image)`` where ``faces`` is the list of detected
+        faces and ``image`` is the decoded BGR image (or ``None`` if decoding
+        failed).
+    """
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return [], None
+    faces = face_app.get(img)
+    return faces, img
+
+
+def _crop_encode(
+    img: np.ndarray, bbox: List[int]
+) -> Optional[bytes]:
+    """Crop the face region (with padding) and JPEG-encode it (sync).
+
+    Args:
+        img: Decoded BGR image.
+        bbox: Face bounding box ``[x1, y1, x2, y2]``.
+
+    Returns:
+        JPEG-encoded bytes of the cropped face, or ``None`` on failure.
+    """
+    height, width = img.shape[:2]
+    x1 = max(0, bbox[0] - _CROP_PADDING)
+    y1 = max(0, bbox[1] - _CROP_PADDING)
+    x2 = min(width, bbox[2] + _CROP_PADDING)
+    y2 = min(height, bbox[3] + _CROP_PADDING)
+
+    cropped = img[y1:y2, x1:x2]
+    if cropped.size == 0:
+        return None
+
+    ok, buffer = cv2.imencode(".jpg", cropped)
+    if not ok:
+        return None
+    return buffer.tobytes()
+
+
+def _to_vector_literal(embedding: np.ndarray) -> str:
+    """Format a numpy embedding as a pgvector text literal ``[v1,v2,...]``.
+
+    This string form is accepted both by ``$1::vector`` casts in raw SQL and
+    by Supabase/PostgREST when writing to a ``vector`` column.
+    """
+    return "[" + ",".join(str(float(v)) for v in embedding.tolist()) + "]"
+
+
+async def _find_duplicate(
+    embedding: np.ndarray,
+) -> Optional[DuplicateMatch]:
+    """Search for the nearest stored face via pgvector cosine similarity.
+
+    Returns a :class:`DuplicateMatch` when a face exceeds the configured
+    similarity threshold, otherwise ``None``. Any error (including an
+    uninitialised pool) is swallowed and treated as "no duplicate".
+    """
+    vector_literal = _to_vector_literal(embedding)
+    query = """
+        SELECT submission_id, created_at,
+          1 - (embedding <=> $1::vector) AS similarity
+        FROM face_embeddings
+        ORDER BY embedding <=> $1::vector
+        LIMIT 1
+    """
+    try:
+        pool = await supabase_client.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, vector_literal)
+    except RuntimeError:
+        logger.warning("DB pool unavailable; skipping duplicate detection.")
+        return None
+    except Exception:  # noqa: BLE001 - duplicate check must never crash
+        logger.exception("Duplicate detection query failed")
+        return None
+
+    if row is None:
+        return None
+
+    similarity = float(row["similarity"])
+    if similarity > settings.DUPLICATE_SIMILARITY_THRESHOLD:
+        return DuplicateMatch(
+            matched_submission_id=str(row["submission_id"]),
+            similarity_score=round(similarity, 4),
+            matched_at=str(row["created_at"]),
+        )
+    return None
+
+
+def _persist_to_supabase(
+    submission_id: str,
+    embedding: np.ndarray,
+    confidence: float,
+    bbox: List[int],
+    duplicate_match: Optional[DuplicateMatch],
+    id_image_url: Optional[str],
+    face_image_url: Optional[str],
+) -> None:
+    """Insert the submission and face embedding into Supabase (sync).
+
+    Raises on failure so the caller can mark ``embedding_saved=False``.
+    """
+    client = supabase_client.supabase
+    if client is None:
+        raise RuntimeError("Supabase client not configured")
+
+    client.table("kyc_submissions").insert(
+        {
+            "id": submission_id,
+            "status": "pending",
+            "risk_score": 0,
+        }
+    ).execute()
+
+    client.table("face_embeddings").insert(
+        {
+            "submission_id": submission_id,
+            "embedding": _to_vector_literal(embedding),
+            "detection_confidence": confidence,
+            "face_region": {
+                "x1": int(bbox[0]),
+                "y1": int(bbox[1]),
+                "x2": int(bbox[2]),
+                "y2": int(bbox[3]),
+            },
+            "is_duplicate": duplicate_match is not None,
+            "matched_submission_id": (
+                duplicate_match.matched_submission_id
+                if duplicate_match is not None
+                else None
+            ),
+            "id_image_url": id_image_url,
+            "face_image_url": face_image_url,
+        }
+    ).execute()
+
+
+async def extract_and_save_face(
+    image_bytes: bytes,
+    submission_id: str | None = None,
+) -> FaceExtractionResult:
+    """Detect, embed, deduplicate and persist a face from an ID image.
+
+    Args:
+        image_bytes: Raw bytes of the uploaded ID document image.
+        submission_id: Optional caller-provided submission id; generated when
+            omitted. Acts as the linking key across all KYC tables.
+
+    Returns:
+        A fully populated :class:`FaceExtractionResult`. This coroutine never
+        raises: failures are surfaced via the ``success``/``error`` fields.
+    """
+    start_time = perf_counter()
+    # Always generate a fresh UUID when the caller passes nothing, an empty
+    # string, or Swagger's default placeholder value "string".
+    if not submission_id or not _UUID_RE.match(submission_id):
+        submission_id = str(uuid.uuid4())
+    loop = asyncio.get_event_loop()
+
+    def _elapsed_ms() -> int:
+        return int((perf_counter() - start_time) * 1000)
+
+    try:
+        # Step 2: upload original ID image (non-fatal on failure).
+        id_image_url: Optional[str] = None
+        try:
+            id_image_url = await cloudinary_service.upload_image(
+                image_bytes,
+                folder="kyc/documents",
+                public_id=f"doc_{submission_id}",
+            )
+        except Exception:  # noqa: BLE001 - continue without the URL
+            logger.exception("Cloudinary upload of ID image failed")
+
+        # Step 3: detect faces.
+        faces, img = await loop.run_in_executor(None, _detect, image_bytes)
+
+        # Step 4: no face found -> early, successful result.
+        if not faces or img is None:
+            return FaceExtractionResult(
+                success=True,
+                submission_id=submission_id,
+                face_found=False,
+                detection_confidence=None,
+                face_region=None,
+                is_duplicate=False,
+                duplicate_match=None,
+                id_image_url=id_image_url,
+                face_image_url=None,
+                embedding_saved=False,
+                processing_time_ms=_elapsed_ms(),
+                error=None,
+            )
+
+        # Step 5: choose the highest-confidence face.
+        best_face = max(faces, key=lambda f: float(f.det_score))
+
+        # Step 6: extract bbox, embedding and confidence.
+        bbox = [int(v) for v in best_face.bbox.astype(int)]
+        embedding = np.asarray(best_face.embedding, dtype=np.float32)
+        confidence = float(best_face.det_score)
+
+        face_region = FaceRegion(
+            x1=bbox[0],
+            y1=bbox[1],
+            x2=bbox[2],
+            y2=bbox[3],
+            width=bbox[2] - bbox[0],
+            height=bbox[3] - bbox[1],
+        )
+
+        # Steps 7-8: crop face and upload (non-fatal on failure).
+        face_image_url: Optional[str] = None
+        face_bytes = await loop.run_in_executor(
+            None, _crop_encode, img, bbox
+        )
+        if face_bytes is not None:
+            try:
+                face_image_url = await cloudinary_service.upload_face_crop(
+                    face_bytes, submission_id
+                )
+            except Exception:  # noqa: BLE001 - continue without the URL
+                logger.exception("Cloudinary upload of face crop failed")
+
+        # Step 9: duplicate detection via pgvector.
+        duplicate_match = await _find_duplicate(embedding)
+
+        # Steps 10-11: persist submission + embedding (non-fatal on failure).
+        embedding_saved = False
+        try:
+            await loop.run_in_executor(
+                None,
+                _persist_to_supabase,
+                submission_id,
+                embedding,
+                confidence,
+                bbox,
+                duplicate_match,
+                id_image_url,
+                face_image_url,
+            )
+            embedding_saved = True
+        except Exception:  # noqa: BLE001 - persistence failure is non-fatal
+            logger.exception("Failed to persist face data to Supabase")
+
+        # Step 12: full result.
+        return FaceExtractionResult(
+            success=True,
+            submission_id=submission_id,
+            face_found=True,
+            detection_confidence=confidence,
+            face_region=face_region,
+            is_duplicate=duplicate_match is not None,
+            duplicate_match=duplicate_match,
+            id_image_url=id_image_url,
+            face_image_url=face_image_url,
+            embedding_saved=embedding_saved,
+            processing_time_ms=_elapsed_ms(),
+            error=None,
+        )
+    except Exception as exc:  # noqa: BLE001 - never crash the caller
+        logger.exception("Unexpected failure during face extraction")
+        return FaceExtractionResult(
+            success=False,
+            submission_id=submission_id,
+            face_found=False,
+            detection_confidence=None,
+            face_region=None,
+            is_duplicate=False,
+            duplicate_match=None,
+            id_image_url=None,
+            face_image_url=None,
+            embedding_saved=False,
+            processing_time_ms=_elapsed_ms(),
+            error=str(exc),
+        )
