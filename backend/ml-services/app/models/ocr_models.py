@@ -44,3 +44,44 @@ class OCRResult(BaseModel):
     thumbnail_region: Optional[List[int]] = Field(
         default=None, description="Secondary thumbnail bounding box."
     )
+
+
+class ForgeryResult(BaseModel):
+    """Structured result returned by the forgery detection service.
+
+    Attributes:
+        forgery_score: Overall forgery score (0-100).
+        decision: Classification based on score thresholds.
+        ela_heatmap_b64: Base64-encoded PNG of the ELA heatmap.
+        suspicious_regions: List of bounding boxes for suspicious areas.
+        edge_consistency_score: Score from edge consistency analysis (0-100).
+        noise_score: Score from noise pattern analysis (0-100).
+        processing_time_ms: End-to-end processing time in milliseconds.
+        details: Additional analysis details.
+    """
+
+    forgery_score: float = Field(
+        ..., ge=0.0, le=100.0, description="Overall forgery score."
+    )
+    decision: Literal["genuine", "suspicious", "forged"] = Field(
+        ..., description="Classification based on score."
+    )
+    ela_heatmap_b64: str = Field(
+        ..., description="Base64-encoded PNG of ELA heatmap."
+    )
+    suspicious_regions: List[List[int]] = Field(
+        default_factory=list,
+        description="List of bounding boxes [x, y, w, h] for suspicious areas.",
+    )
+    edge_consistency_score: float = Field(
+        default=0.0, ge=0.0, le=100.0, description="Edge consistency score."
+    )
+    noise_score: float = Field(
+        default=0.0, ge=0.0, le=100.0, description="Noise pattern score."
+    )
+    processing_time_ms: int = Field(
+        default=0, description="Processing time in milliseconds."
+    )
+    details: Dict = Field(
+        default_factory=dict, description="Additional analysis details."
+    )
