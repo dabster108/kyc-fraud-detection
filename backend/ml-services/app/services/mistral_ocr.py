@@ -81,6 +81,18 @@ If document is Nepali National ID Card (राष्ट्रिय परिच
   "mobile_number": null
 }
 
+If document is a Nepali Driving License return:
+{
+  "document_type": "driving_license",
+  "dl_number": "",
+  "full_name": "",
+  "address": "",
+  "date_of_birth_ad": "YYYY-MM-DD",
+  "citizenship_number": null,
+  "date_of_issue": "YYYY-MM-DD",
+  "date_of_expiry": "YYYY-MM-DD"
+}
+
 If document cannot be identified return:
 {
   "document_type": "unknown"
@@ -102,6 +114,14 @@ Rules:
   full_name_* MUST be the given name followed by the surname
   (i.e. "<given_name> <surname>"), in the matching script.
 - nationality is always "Nepalese" for NID.
+- For a Driving License (printed mostly in Latin/English script):
+  dl_number is the "D.L.No." value (e.g. "03-06-00000000").
+  full_name is the holder "Name", address is the "Address".
+  date_of_birth_ad is the "D.O.B", date_of_issue is the "D.O.I" (date of
+  issue) and date_of_expiry is the "D.O.E" (date of expiry); convert every
+  one to YYYY-MM-DD.
+  citizenship_number is the "Citizenship No." if printed, else null.
+  Do NOT extract father/mother name for a driving license.
 - Use Western Arabic digits (0-9) for every number.
 - Use null for any field that is not visible or not applicable.
 """.strip()
@@ -135,6 +155,15 @@ _REQUIRED_FIELDS = {
         "nationality",
         "date_of_issue",
     ),
+    # citizenship_number is explicitly nullable, so it is excluded.
+    "driving_license": (
+        "dl_number",
+        "full_name",
+        "address",
+        "date_of_birth_ad",
+        "date_of_issue",
+        "date_of_expiry",
+    ),
 }
 
 _DEVANAGARI_DIGIT_MAP = str.maketrans("०१२३४५६७८९", "0123456789")
@@ -149,6 +178,8 @@ _NUMERIC_FIELDS = (
     "date_of_birth_bs",
     "date_of_birth_ad",
     "date_of_issue",
+    "date_of_expiry",
+    "dl_number",
     "mobile_number",
 )
 
@@ -235,7 +266,8 @@ def _compute_photo_region(
     """Compute the hardcoded portrait photo region for a document type.
 
     Args:
-        document_type: ``"citizenship"``, ``"nid"`` or ``"unknown"``.
+        document_type: ``"citizenship"``, ``"nid"``, ``"driving_license"``
+            or ``"unknown"``.
         width: Image width in pixels.
         height: Image height in pixels.
 
@@ -246,6 +278,8 @@ def _compute_photo_region(
         return [0, 0, int(width * 0.30), int(height * 0.60)]
     if document_type == "nid":
         return [int(width * 0.65), 0, width, int(height * 0.70)]
+    if document_type == "driving_license":
+        return [0, int(height * 0.15), int(width * 0.28), int(height * 0.80)]
     return None
 
 
@@ -332,7 +366,12 @@ async def extract_document(image_bytes: bytes) -> OCRResult:
 
         parsed: Dict[str, Any] = json.loads(_strip_json_fences(raw_text))
         document_type = parsed.get("document_type", "unknown")
-        if document_type not in ("citizenship", "nid", "unknown"):
+        if document_type not in (
+            "citizenship",
+            "nid",
+            "driving_license",
+            "unknown",
+        ):
             document_type = "unknown"
 
         fields = {k: v for k, v in parsed.items() if k != "document_type"}
@@ -425,6 +464,18 @@ def supported_documents() -> List[Dict[str, Any]]:
                 "nationality",
                 "date_of_issue",
                 "mobile_number",
+            ],
+        },
+        {
+            "document_type": "driving_license",
+            "fields": [
+                "dl_number",
+                "full_name",
+                "address",
+                "date_of_birth_ad",
+                "citizenship_number",
+                "date_of_issue",
+                "date_of_expiry",
             ],
         },
     ]

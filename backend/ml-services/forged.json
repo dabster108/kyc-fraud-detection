@@ -1,0 +1,26 @@
+[
+  {
+    "id": "7e63fe71-0460-497d-89e9-e59383b7a80a",
+    "timestamp": "2026-05-29T06:35:55.368512+00:00",
+    "engine_used": "mistral",
+    "document_type": "driving_license",
+    "extracted_fields": {
+      "dl_number": "006-818469",
+      "full_name": "Chandra Man Shrestha",
+      "address": "Tinmanebhanjyang, Gherung, Gandaki, Gorkha, Nepal",
+      "date_of_birth_ad": "1963-05-28",
+      "citizenship_number": "478",
+      "date_of_issue": "2015-11-30",
+      "date_of_expiry": "2018-06-25"
+    },
+    "photo_region": [
+      0,
+      62,
+      182,
+      334
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 2895,
+    "raw_text": "{\n  \"document_type\": \"driving_license\",\n  \"dl_number\": \"006-818469\",\n  \"full_name\": \"Chandra Man Shrestha\",\n  \"address\": \"Tinmanebhanjyang, Gherung, Gandaki, Gorkha, Nepal\",\n  \"date_of_birth_ad\": \"1963-05-28\",\n  \"citizenship_number\": \"478\",\n  \"date_of_issue\": \"2015-11-30\",\n  \"date_of_expiry\": \"2018-06-25\"\n}"
+  }
+]
