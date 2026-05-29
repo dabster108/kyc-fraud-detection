@@ -41,27 +41,49 @@ from app.database import supabase_client
 
 logger = logging.getLogger(__name__)
 
-# Singleton face analysis model, initialised once at import time.
-face_app = FaceAnalysis(
-    name=settings.FACE_MODEL_NAME, providers=["CPUExecutionProvider"]
-)
-face_app.prepare(ctx_id=-1, det_size=(640, 640))
+# Singleton — populated lazily via load_models().
+face_app: Optional[FaceAnalysis] = None
+_models_ready = False
+_load_lock = __import__("threading").Lock()
 
 # Pixels of padding added around the detected face before cropping.
 _CROP_PADDING = 10
 
 
-def _detect(img_bytes: bytes) -> Tuple[list, Optional[np.ndarray]]:
-    """Decode image bytes and run InsightFace detection (sync, for executor).
+def load_models() -> None:
+    """Load InsightFace ONNX models into memory (blocking, thread-safe).
 
-    Args:
-        img_bytes: Raw image bytes.
-
-    Returns:
-        A tuple of ``(faces, image)`` where ``faces`` is the list of detected
-        faces and ``image`` is the decoded BGR image (or ``None`` if decoding
-        failed).
+    Called from the FastAPI startup hook inside a thread-pool executor so
+    the server binds immediately and this heavy work runs in the background.
+    The lock ensures the models are only loaded once even if called from
+    multiple threads.
     """
+    global face_app, _models_ready
+    with _load_lock:
+        if _models_ready:
+            return
+        logger.info("Loading InsightFace models (%s)...", settings.FACE_MODEL_NAME)
+        t0 = perf_counter()
+        _app = FaceAnalysis(
+            name=settings.FACE_MODEL_NAME, providers=["CPUExecutionProvider"]
+        )
+        _app.prepare(ctx_id=-1, det_size=(640, 640))
+        # Assign to global only after fully prepared so _detect never sees
+        # a half-initialised object.
+        face_app = _app
+        _models_ready = True
+        logger.info("InsightFace models ready in %.1fs", perf_counter() - t0)
+
+
+def is_ready() -> bool:
+    """Return True once the models have finished loading."""
+    return _models_ready
+
+
+def _detect(img_bytes: bytes) -> Tuple[list, Optional[np.ndarray]]:
+    """Decode image bytes and run InsightFace detection (sync, for executor)."""
+    if face_app is None:
+        raise RuntimeError("Face models are still loading. Please retry in a moment.")
     nparr = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:

@@ -8,13 +8,15 @@ uploaded ID image, stores its embedding, checks for duplicates and returns a
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import settings
+from app.database.supabase_client import supabase
 from app.models.face_models import FaceExtractionResult
 from app.services import face_extractor
+from app.services.face_extractor import is_ready as models_ready
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,13 @@ async def extract(
     response body rather than an HTTP error. A ``500`` is only returned for
     truly unexpected failures.
     """
+    if not models_ready():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Face models are still loading. Please retry in a few seconds.",
+            headers={"Retry-After": "5"},
+        )
+
     content_type = (image.content_type or "").lower()
     if content_type not in _ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -91,3 +100,54 @@ async def extract(
         )
 
     return result
+
+
+@router.get("/latest")
+async def get_latest_submission() -> Dict[str, Any]:
+    """Return the most recent face embedding with its OCR data."""
+    if supabase is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase client is not configured.",
+        )
+
+    face_resp = (
+        supabase.table("face_embeddings")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not face_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No face embeddings found.",
+        )
+
+    row = face_resp.data[0]
+    submission_id = row.get("submission_id", "")
+
+    extracted_fields: Dict[str, Any] = {}
+    document_type = ""
+
+    ocr_resp = (
+        supabase.table("ocr_results")
+        .select("extracted_fields, document_type")
+        .eq("submission_id", submission_id)
+        .limit(1)
+        .execute()
+    )
+
+    if ocr_resp.data:
+        ocr_row = ocr_resp.data[0]
+        extracted_fields = ocr_row.get("extracted_fields", {})
+        document_type = ocr_row.get("document_type", "")
+
+    return {
+        "submission_id": submission_id,
+        "face_image_url": row.get("face_image_url", ""),
+        "id_image_url": row.get("id_image_url", ""),
+        "document_type": document_type,
+        "extracted_fields": extracted_fields,
+    }
