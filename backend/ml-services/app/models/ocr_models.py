@@ -22,9 +22,9 @@ class OCRResult(BaseModel):
             ``None`` when not applicable.
     """
 
-    document_type: Literal["citizenship", "nid", "unknown"] = Field(
-        ..., description="Detected document type."
-    )
+    document_type: Literal[
+        "citizenship", "nid", "driving_license", "unknown"
+    ] = Field(..., description="Detected document type.")
     extracted_fields: Dict = Field(
         default_factory=dict,
         description="Structured fields parsed from the document.",
