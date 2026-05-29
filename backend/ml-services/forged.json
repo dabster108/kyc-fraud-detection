@@ -1,0 +1,174 @@
+[
+  {
+    "id": "7d56beb4-0b25-4266-a4c3-1bdd1bc8ad18",
+    "timestamp": "2026-05-29T06:02:47.763162+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "३१-०१-७६-०८११९",
+      "full_name_nepali": "सानु थिड",
+      "gender": "other",
+      "date_of_birth_bs": "2045-09-28",
+      "date_of_birth_ad": "1988-09-28",
+      "birth_place_district": "मकवानपुर",
+      "birth_place_vdc": "पदमपोखरी गा.वि.स.",
+      "permanent_address_district": "मकवानपुर",
+      "permanent_address_municipality": "हेटौंडा",
+      "ward_number": "१२",
+      "issued_district": "मकवानपुर"
+    },
+    "photo_region": [
+      0,
+      0,
+      321,
+      456
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 3096,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"३१-०१-७६-०८११९\",\n  \"full_name_nepali\": \"सानु थिड\",\n  \"gender\": \"other\",\n  \"date_of_birth_bs\": \"2045-09-28\",\n  \"date_of_birth_ad\": \"1988-09-12\",\n  \"birth_place_district\": \"मकवानपुर\",\n  \"birth_place_vdc\": \"पदमपोखरी गा.वि.स.\",\n  \"permanent_address_district\": \"मकवानपुर\",\n  \"permanent_address_municipality\": \"हेटौंडा\",\n  \"ward_number\": \"१२\",\n  \"issued_district\": \"मकवानपुर\"\n}\n```"
+  },
+  {
+    "id": "b1b08fdb-c475-42b7-804d-13c5e6217b8a",
+    "timestamp": "2026-05-29T06:13:38.175232+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "३१-०१-७६-०८११९",
+      "full_name_nepali": "सानु थिद",
+      "gender": "other",
+      "date_of_birth_bs": "2045-09-28",
+      "date_of_birth_ad": "1988-09-28",
+      "birth_place_district": "मकवानपुर",
+      "birth_place_vdc": "पदमपोखरी गा.वि.स.",
+      "permanent_address_district": "मकवानपुर",
+      "permanent_address_municipality": "हेटौंडा",
+      "ward_number": "१२",
+      "issued_district": "मकवानपुर"
+    },
+    "photo_region": [
+      0,
+      0,
+      321,
+      456
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 2755,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"३१-०१-७६-०८११९\",\n  \"full_name_nepali\": \"सानु थिद\",\n  \"gender\": \"other\",\n  \"date_of_birth_bs\": \"2045-09-28\",\n  \"date_of_birth_ad\": \"1988-09-13\",\n  \"birth_place_district\": \"मकवानपुर\",\n  \"birth_place_vdc\": \"पदमपोखरी गा.वि.स.\",\n  \"permanent_address_district\": \"मकवानपुर\",\n  \"permanent_address_municipality\": \"हेटौंडा\",\n  \"ward_number\": \"१२\",\n  \"issued_district\": \"मकवानपुर\"\n}\n```"
+  },
+  {
+    "id": "8ce8e710-280f-4351-8e32-0b6e30d572be",
+    "timestamp": "2026-05-29T06:15:03.773177+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "31-01-76-08119",
+      "full_name_nepali": "सानु थिड",
+      "full_name_english": "Sanu Thing",
+      "gender": "other",
+      "date_of_birth_bs": "2045-02-28",
+      "date_of_birth_ad": "1988-02-28",
+      "birth_place_district": "मकवानपुर",
+      "birth_place_district_english": "Makwanpur",
+      "birth_place_vdc": "पदमपोखरी",
+      "birth_place_vdc_english": "Padampokhari",
+      "permanent_address_district": "मकवानपुर",
+      "permanent_address_district_english": "Makwanpur",
+      "permanent_address_municipality": "हेटौंडा",
+      "permanent_address_municipality_english": "Hetauda",
+      "ward_number": "12",
+      "issued_district": "मकवानपुर",
+      "issued_district_english": "Makwanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      321,
+      456
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 4235,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"३१-०१-७६-०८११९\",\n  \"full_name_nepali\": \"सानु थिड\",\n  \"full_name_english\": \"Sanu Thing\",\n  \"gender\": \"other\",\n  \"date_of_birth_bs\": \"2045-02-28\",\n  \"date_of_birth_ad\": \"1988-06-13\",\n  \"birth_place_district\": \"मकवानपुर\",\n  \"birth_place_district_english\": \"Makwanpur\",\n  \"birth_place_vdc\": \"पदमपोखरी\",\n  \"birth_place_vdc_english\": \"Padampokhari\",\n  \"permanent_address_district\": \"मकवानपुर\",\n  \"permanent_address_district_english\": \"Makwanpur\",\n  \"permanent_address_municipality\": \"हेटौंडा\",\n  \"permanent_address_municipality_english\": \"Hetauda\",\n  \"ward_number\": \"१२\",\n  \"issued_district\": \"मकवानपुर\",\n  \"issued_district_english\": \"Makwanpur\"\n}\n```"
+  },
+  {
+    "id": "ab7277a2-8b1b-4b8f-b1e4-fc72c84fbb10",
+    "timestamp": "2026-05-29T06:18:05.398525+00:00",
+    "engine_used": "mistral",
+    "document_type": "nid",
+    "extracted_fields": {
+      "nin": "023-456-2130",
+      "full_name_nepali": "कोइराला पोखरेल भगवती कुमारी",
+      "full_name_english": "Koirala Pokhrel Bhagawati Kumari",
+      "gender": "female",
+      "date_of_birth_ad": "1978-02-05",
+      "date_of_birth_bs": "2034-10-23",
+      "nationality": "Nepalese",
+      "date_of_issue": "01-01-2017",
+      "mobile_number": null
+    },
+    "photo_region": [
+      665,
+      0,
+      1024,
+      455
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 2374,
+    "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"full_name_nepali\": \"कोइराला पोखरेल भगवती कुमारी\",\n  \"full_name_english\": \"Koirala Pokhrel Bhagawati Kumari\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
+  },
+  {
+    "id": "f35468ac-da27-47b6-a418-a3a6c0102ebe",
+    "timestamp": "2026-05-29T06:22:37.703362+00:00",
+    "engine_used": "mistral",
+    "document_type": "nid",
+    "extracted_fields": {
+      "nin": "023-456-2130",
+      "full_name_nepali": "कोइराला पोखरेल भगवती कुमारी",
+      "full_name_english": "Koirala Pokhrel Bhagwati Kumari",
+      "gender": "female",
+      "date_of_birth_ad": "1978-02-05",
+      "date_of_birth_bs": "2034-10-23",
+      "nationality": "Nepalese",
+      "date_of_issue": "01-01-2017",
+      "mobile_number": null
+    },
+    "photo_region": [
+      665,
+      0,
+      1024,
+      455
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 3864,
+    "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"full_name_nepali\": \"कोइराला पोखरेल भगवती कुमारी\",\n  \"full_name_english\": \"Koirala Pokhrel Bhagwati Kumari\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
+  },
+  {
+    "id": "3298744b-0231-44ee-96ef-fe83ab36921d",
+    "timestamp": "2026-05-29T06:23:14.557537+00:00",
+    "engine_used": "mistral",
+    "document_type": "nid",
+    "extracted_fields": {
+      "nin": "023-456-2130",
+      "surname_nepali": "कोइराला पोखरेल",
+      "surname_english": "Koirala Pokhrel",
+      "given_name_nepali": "भगवती कुमारी",
+      "given_name_english": "Bhagawati Kumari",
+      "full_name_nepali": "भगवती कुमारी कोइराला पोखरेल",
+      "full_name_english": "Bhagawati Kumari Koirala Pokhrel",
+      "gender": "female",
+      "date_of_birth_ad": "1978-02-05",
+      "date_of_birth_bs": "2034-10-23",
+      "nationality": "Nepalese",
+      "date_of_issue": "01-01-2017",
+      "mobile_number": null
+    },
+    "photo_region": [
+      665,
+      0,
+      1024,
+      455
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 3470,
+    "raw_text": "```json\n{\n  \"document_type\": \"nid\",\n  \"nin\": \"023-456-2130\",\n  \"surname_nepali\": \"कोइराला पोखरेल\",\n  \"surname_english\": \"Koirala Pokhrel\",\n  \"given_name_nepali\": \"भगवती कुमारी\",\n  \"given_name_english\": \"Bhagawati Kumari\",\n  \"full_name_nepali\": \"भगवती कुमारी कोइराला पोखरेल\",\n  \"full_name_english\": \"Bhagawati Kumari Koirala Pokhrel\",\n  \"gender\": \"female\",\n  \"date_of_birth_ad\": \"1978-02-05\",\n  \"date_of_birth_bs\": \"2034-10-23\",\n  \"nationality\": \"Nepalese\",\n  \"date_of_issue\": \"01-01-2017\",\n  \"mobile_number\": null\n}\n```"
+  }
+]

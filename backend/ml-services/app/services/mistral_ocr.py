@@ -1,300 +1,430 @@
-import asyncio
+"""Mistral-powered OCR service for Nepali KYC documents.
+
+Sends the document image to a Mistral vision chat model with a strict
+system prompt that returns a structured JSON object, then post-processes the
+result (photo-region geometry, BS->AD date conversion, confidence scoring).
+
+Note:
+    The Mistral ``mistral-ocr-latest`` model is the pure-OCR endpoint and is
+    **not** compatible with the chat/system-prompt JSON extraction used here.
+    A vision-capable chat model is required (configured via
+    ``settings.MISTRAL_MODEL``, default ``pixtral-12b-2409``).
+"""
+
+from __future__ import annotations
+
 import base64
-import hashlib
+import io
 import json
 import logging
-import os
 import re
 import time
-import uuid
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib import request, error as url_error
 
-from mistralai import Mistral
-from pdf2image import convert_from_bytes
 from PIL import Image
 
 from app.core.config import settings
+from app.models.ocr_models import OCRResult
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL_SECONDS = 24 * 60 * 60
-MAX_PAGES = 4
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
-SUPPORTED_PDF_EXTENSIONS = {".pdf"}
+# Exact system prompt that instructs the model to emit a single JSON object.
+SYSTEM_PROMPT = """
+You are a KYC document parser for Nepali government ID documents.
+Analyze the image and return ONLY a valid JSON object with absolutely no extra text,
+no markdown, no code blocks, no explanation.
+
+DEVANAGARI DIGIT REFERENCE (read every number using this table exactly):
+  ० = 0    १ = 1    २ = 2    ३ = 3    ४ = 4
+  ५ = 5    ६ = 6    ७ = 7    ८ = 8    ९ = 9
+Do NOT confuse २ (2) with ९ (9) or ३ (3); look at each glyph carefully.
+ALL numeric output (citizenship_number, nin, dates, ward_number) MUST use
+Western Arabic digits (0-9), never Devanagari digits.
+
+If document is Nepali Citizenship Card (नागरिकता पत्र) return:
+{
+  "document_type": "citizenship",
+  "citizenship_number": "",
+  "full_name_nepali": "",
+  "full_name_english": "",
+  "gender": "male|female|other",
+  "date_of_birth_bs": "YYYY-MM-DD",
+  "date_of_birth_ad": "YYYY-MM-DD",
+  "birth_place_district": "",
+  "birth_place_district_english": "",
+  "birth_place_vdc": "",
+  "birth_place_vdc_english": "",
+  "permanent_address_district": "",
+  "permanent_address_district_english": "",
+  "permanent_address_municipality": "",
+  "permanent_address_municipality_english": "",
+  "ward_number": "",
+  "issued_district": "",
+  "issued_district_english": ""
+}
+
+If document is Nepali National ID Card (राष्ट्रिय परिचयपत्र) return:
+{
+  "document_type": "nid",
+  "nin": "",
+  "surname_nepali": "",
+  "surname_english": "",
+  "given_name_nepali": "",
+  "given_name_english": "",
+  "full_name_nepali": "",
+  "full_name_english": "",
+  "gender": "male|female",
+  "date_of_birth_ad": "YYYY-MM-DD",
+  "date_of_birth_bs": "YYYY-MM-DD",
+  "nationality": "Nepalese",
+  "date_of_issue": "DD-MM-YYYY",
+  "mobile_number": null
+}
+
+If document cannot be identified return:
+{
+  "document_type": "unknown"
+}
+
+Rules:
+- Read the citizenship date of birth from the line "साल XXXX महिना XX गते XX"
+  where साल = year, महिना = month, गते = day. Convert to YYYY-MM-DD.
+  Read the महिना (month) digits especially carefully (e.g. ०२ = 02, not 09).
+- For citizenship date_of_birth_ad: subtract 57 from the BS year if BS month
+  <= 9, else subtract 56. Keep the same month and day.
+- For gender on citizenship: पुरुष=male, महिला=female, अन्य=other.
+- The "_nepali" fields keep the original Devanagari script exactly as printed.
+- The "_english" fields are the romanized (transliterated) Latin spelling of
+  the corresponding Devanagari value (e.g. सानु थिड -> "Sanu Thing",
+  मकवानपुर -> "Makwanpur", हेटौंडा -> "Hetauda", पदमपोखरी -> "Padampokhari").
+- For NID, read the SURNAME (थर) and GIVEN NAME (नाम) fields separately.
+  surname_* is the surname/family name, given_name_* is the given name(s).
+  full_name_* MUST be the given name followed by the surname
+  (i.e. "<given_name> <surname>"), in the matching script.
+- nationality is always "Nepalese" for NID.
+- Use Western Arabic digits (0-9) for every number.
+- Use null for any field that is not visible or not applicable.
+""".strip()
+
+# Required fields per document type (used for confidence scoring).
+_REQUIRED_FIELDS = {
+    "citizenship": (
+        "citizenship_number",
+        "full_name_nepali",
+        "full_name_english",
+        "gender",
+        "date_of_birth_bs",
+        "date_of_birth_ad",
+        "birth_place_district",
+        "permanent_address_district",
+        "ward_number",
+        "issued_district",
+    ),
+    # mobile_number is explicitly nullable, so it is excluded.
+    "nid": (
+        "nin",
+        "surname_nepali",
+        "surname_english",
+        "given_name_nepali",
+        "given_name_english",
+        "full_name_nepali",
+        "full_name_english",
+        "gender",
+        "date_of_birth_ad",
+        "date_of_birth_bs",
+        "nationality",
+        "date_of_issue",
+    ),
+}
+
+_DEVANAGARI_DIGIT_MAP = str.maketrans("०१२३४५६७८९", "0123456789")
+
+# Fields whose values are pure numbers — any Devanagari digits in them are
+# converted to Western Arabic digits.  Other (name/place) fields keep their
+# Devanagari script untouched so the original text is preserved.
+_NUMERIC_FIELDS = (
+    "citizenship_number",
+    "nin",
+    "ward_number",
+    "date_of_birth_bs",
+    "date_of_birth_ad",
+    "date_of_issue",
+    "mobile_number",
+)
 
 
-@dataclass
-class OCRResult:
-    extracted_data: Dict[str, Any]
-    ocr_metadata: Dict[str, Any]
-    raw_text: str
+def _devanagari_to_ascii(text: str) -> str:
+    """Transliterate Devanagari digits (०-९) to ASCII digits (0-9)."""
+    return text.translate(_DEVANAGARI_DIGIT_MAP)
 
 
-class MistralOCRService:
-    def __init__(self) -> None:
-        self.api_key = os.getenv("MISTRAL_API_KEY", "").strip()
-        self.ocr_model = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-2512")
-        self.vision_model = os.getenv("MISTRAL_VISION_MODEL", "pixtral-12b-2409")
-        self.client: Optional[Mistral] = None
-        if self.api_key:
-            self.client = Mistral(api_key=self.api_key)
+def _normalize_numeric_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert Devanagari digits to Western Arabic in all numeric fields.
 
-        self.cache_dir = Path(settings.TEMP_DIR) / "ocr_cache"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    The model is instructed to emit Western digits, but this guarantees it
+    deterministically (e.g. ``"३१-०१-७६-०८११९"`` -> ``"31-01-76-08119"``,
+    ``"१२"`` -> ``"12"``).  Non-numeric fields are left unchanged.
+    """
+    for key in _NUMERIC_FIELDS:
+        value = fields.get(key)
+        if isinstance(value, str) and value:
+            fields[key] = _devanagari_to_ascii(value)
+    return fields
 
-    async def extract_document(
-        self,
-        file_bytes: bytes,
-        filename: str,
-        document_type: str,
-        request_id: Optional[str] = None,
-    ) -> OCRResult:
-        request_id = request_id or str(uuid.uuid4())
-        self._validate_file_size(file_bytes)
 
-        cache_key = self._cache_key(file_bytes, filename, document_type)
-        cached = self._read_cache(cache_key)
-        if cached:
-            logger.info("Mistral OCR cache hit", extra={"request_id": request_id})
-            return cached
+def _compose_nid_full_name(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure NID ``full_name_*`` is ``"<given name> <surname>"``.
 
-        start_time = time.time()
-        images = await self._load_images(file_bytes, filename)
-        raw_text, model_used, usage = await self._run_ocr(images, document_type, request_id)
-        extracted = self._extract_fields(raw_text, document_type)
-        extraction_confidence = self._estimate_confidence(raw_text)
-        extracted["document_type"] = document_type
-        extracted["extraction_confidence"] = extraction_confidence
+    Recomputes the combined name from the separate ``given_name_*`` and
+    ``surname_*`` fields when both are available, so the full name always
+    reflects the given-name-then-surname ordering.
+    """
+    for script in ("nepali", "english"):
+        given = (fields.get(f"given_name_{script}") or "").strip()
+        surname = (fields.get(f"surname_{script}") or "").strip()
+        if given or surname:
+            fields[f"full_name_{script}"] = f"{given} {surname}".strip()
+    return fields
 
-        duration_ms = int((time.time() - start_time) * 1000)
-        ocr_metadata = {
-            "processing_time_ms": duration_ms,
-            "pages_processed": len(images),
-            "model_used": model_used,
-            "token_usage": usage,
-        }
 
-        result = OCRResult(extracted_data=extracted, ocr_metadata=ocr_metadata, raw_text=raw_text)
-        self._write_cache(cache_key, result)
-        self._log_result(request_id, result)
-        return result
+def _strip_json_fences(text: str) -> str:
+    """Remove markdown code fences and surrounding noise from a JSON string.
 
-    def _validate_file_size(self, file_bytes: bytes) -> None:
-        if len(file_bytes) > settings.MAX_FILE_SIZE:
-            raise ValueError("File size exceeds MAX_FILE_SIZE")
+    Models sometimes wrap JSON in ```json ... ``` despite instructions; this
+    extracts the first balanced ``{...}`` block found in ``text``.
+    """
+    cleaned = text.strip()
+    # Drop ```json / ``` fences if present.
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    # Fall back to the outermost brace span.
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return cleaned[start : end + 1]
+    return cleaned
 
-    async def _load_images(self, file_bytes: bytes, filename: str) -> List[Image.Image]:
-        suffix = Path(filename).suffix.lower()
-        if suffix in SUPPORTED_IMAGE_EXTENSIONS:
-            return [await asyncio.to_thread(Image.open, self._bytes_to_file(file_bytes))]
-        if suffix in SUPPORTED_PDF_EXTENSIONS:
-            images = await asyncio.to_thread(convert_from_bytes, file_bytes)
-            return images[:MAX_PAGES]
-        raise ValueError("Unsupported file type")
 
-    async def _run_ocr(
-        self,
-        images: List[Image.Image],
-        document_type: str,
-        request_id: str,
-    ) -> Tuple[str, str, Dict[str, Any]]:
-        if not self.api_key:
-            raise RuntimeError("MISTRAL_API_KEY is not configured")
+def _bs_to_ad(date_bs: str) -> Optional[str]:
+    """Approximate AD date from a BS date string using the project rule.
 
-        payload = {
-            "model": self.ocr_model,
-            "document_type": document_type,
-            "images": [self._image_to_base64(img) for img in images],
-        }
+    The conversion subtracts 57 years if the BS month is <= 9, otherwise 56,
+    keeping the month and day unchanged.  Devanagari digits are normalised
+    first.  Returns ``None`` if the input cannot be parsed.
 
-        try:
-            if self.client and hasattr(self.client, "ocr"):
-                result = await asyncio.to_thread(
-                    self.client.ocr.process,
-                    model=self.ocr_model,
-                    document={"type": "image_base64", "image_base64": payload["images"][0]},
-                )
-                raw_text = getattr(result, "text", "") or result.get("text", "")
-                usage = getattr(result, "usage", None) or result.get("usage", {})
-                return raw_text, self.ocr_model, usage
-        except Exception as exc:
-            logger.warning(
-                "Mistral OCR SDK failed, falling back to HTTP",
-                extra={"request_id": request_id, "error": str(exc)},
-            )
+    Args:
+        date_bs: BS date in ``YYYY-MM-DD`` form (ASCII or Devanagari digits).
 
-        return await self._run_ocr_http(payload, request_id)
+    Returns:
+        AD date as ``YYYY-MM-DD`` or ``None``.
+    """
+    if not date_bs:
+        return None
+    ascii_bs = _devanagari_to_ascii(str(date_bs))
+    match = re.search(r"(\d{4})\D+(\d{1,2})\D+(\d{1,2})", ascii_bs)
+    if not match:
+        return None
+    year, month, day = (int(g) for g in match.groups())
+    ad_year = year - 57 if month <= 9 else year - 56
+    return f"{ad_year:04d}-{month:02d}-{day:02d}"
 
-    async def _run_ocr_http(self, payload: Dict[str, Any], request_id: str) -> Tuple[str, str, Dict[str, Any]]:
-        url = "https://api.mistral.ai/v1/ocr"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(url, data=body, headers=headers, method="POST")
+def _compute_photo_region(
+    document_type: str, width: int, height: int
+) -> Optional[List[int]]:
+    """Compute the hardcoded portrait photo region for a document type.
 
-        try:
-            response = await asyncio.to_thread(request.urlopen, req)
-            data = json.loads(response.read().decode("utf-8"))
-            raw_text = data.get("text", "")
-            usage = data.get("usage", {})
-            return raw_text, payload["model"], usage
-        except url_error.HTTPError as exc:
-            if exc.code == 429:
-                logger.warning("Mistral OCR rate limited", extra={"request_id": request_id})
-            raise
+    Args:
+        document_type: ``"citizenship"``, ``"nid"`` or ``"unknown"``.
+        width: Image width in pixels.
+        height: Image height in pixels.
 
-    def _extract_fields(self, raw_text: str, document_type: str) -> Dict[str, Any]:
-        fields: Dict[str, Any] = {
-            "full_name": None,
-            "date_of_birth": None,
-            "document_number": None,
-            "issue_date": None,
-            "expiry_date": None,
-            "address": None,
-            "nationality": None,
-            "document_category": None,
-        }
+    Returns:
+        ``[x1, y1, x2, y2]`` bounding box, or ``None`` for unknown documents.
+    """
+    if document_type == "citizenship":
+        return [0, 0, int(width * 0.30), int(height * 0.60)]
+    if document_type == "nid":
+        return [int(width * 0.65), 0, width, int(height * 0.70)]
+    return None
 
-        normalized = " ".join(raw_text.split())
-        name_match = re.search(r"(Full Name|Name)[:\s]+([A-Z][A-Za-z\s'-]{2,})", normalized, re.IGNORECASE)
-        given_match = re.search(r"(Given Name|First Name)[:\s]+([A-Z][A-Za-z\s'-]{1,})", normalized, re.IGNORECASE)
-        surname_match = re.search(r"(Surname|Last Name|Family Name)[:\s]+([A-Z][A-Za-z\s'-]{1,})", normalized, re.IGNORECASE)
 
-        date_pattern = r"([0-9]{1,2}[-/.][0-9]{1,2}[-/.][0-9]{2,4})"
-        dob_match = re.search(rf"(DOB|Date of Birth|Birth Date)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
-        issue_match = re.search(rf"(Date of Issue|Issue Date|Issued)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
-        exp_match = re.search(rf"(Expiry|Expiration|Valid Until|Date of Expiry)[:\s]+{date_pattern}", normalized, re.IGNORECASE)
+def _score_confidence(document_type: str, fields: Dict[str, Any]) -> float:
+    """Score extraction confidence based on completeness of required fields."""
+    if document_type not in _REQUIRED_FIELDS:
+        return 0.10
+    required = _REQUIRED_FIELDS[document_type]
+    all_present = all(
+        fields.get(key) not in (None, "", []) for key in required
+    )
+    return 0.90 if all_present else 0.65
 
-        doc_number_patterns = [
-            (r"(Passport\s*(No\.?|Number))[:\s]+([A-Z0-9-]{5,})", 3),
-            (r"(Citizenship\s*(No\.?|Number|Certificate\s*No\.?))[:\s]+([A-Z0-9-]{5,})", 3),
-            (r"((Driving|Driver'?s)?\s*Licen[cs]e|DL)\s*(No\.?|Number)[:\s]+([A-Z0-9-]{5,})", 4),
-            (r"(ID|Document|Passport|License|Licence)[^A-Z0-9]{0,6}([A-Z0-9-]{6,})", 2),
-        ]
 
-        addr_match = re.search(r"(Address|Permanent Address)[:\s]+(.+)$", normalized, re.IGNORECASE)
-        nationality_match = re.search(r"Nationality[:\s]+([A-Z][A-Za-z\s'-]{2,})", normalized, re.IGNORECASE)
+def _image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
+    """Return ``(width, height)`` of an image given its raw bytes."""
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        return img.width, img.height
 
-        document_category = None
-        if re.search(r"\bpassport\b", normalized, re.IGNORECASE):
-            document_category = "passport"
-        elif re.search(r"\bcitizenship\b", normalized, re.IGNORECASE):
-            document_category = "citizenship"
-        elif re.search(r"\b(driver'?s|driving|dl)\b", normalized, re.IGNORECASE):
-            document_category = "driver_license"
 
-        doc_match = None
-        for pattern, group_idx in doc_number_patterns:
-            match = re.search(pattern, normalized, re.IGNORECASE)
-            if match:
-                doc_match = (match, group_idx)
-                break
+def _build_messages(image_b64: str, mime: str) -> List[Dict[str, Any]]:
+    """Build the chat messages payload with the system prompt and image."""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Parse this Nepali ID document."},
+                {
+                    "type": "image_url",
+                    "image_url": f"data:{mime};base64,{image_b64}",
+                },
+            ],
+        },
+    ]
 
-        if given_match and surname_match:
-            fields["full_name"] = f"{given_match.group(2).strip()} {surname_match.group(2).strip()}"
-        elif name_match:
-            fields["full_name"] = name_match.group(2).strip()
-        if dob_match:
-            fields["date_of_birth"] = dob_match.group(2).strip()
-        if issue_match:
-            fields["issue_date"] = issue_match.group(2).strip()
-        if doc_match:
-            fields["document_number"] = doc_match[0].group(doc_match[1]).strip()
-        if exp_match:
-            fields["expiry_date"] = exp_match.group(2).strip()
-        if addr_match:
-            fields["address"] = addr_match.group(2).strip()
-        if nationality_match:
-            fields["nationality"] = nationality_match.group(1).strip()
-        if document_category:
-            fields["document_category"] = document_category
 
-        return fields
+def _detect_mime(image_bytes: bytes) -> str:
+    """Best-effort MIME type detection from image magic bytes."""
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
 
-    def _estimate_confidence(self, raw_text: str) -> float:
-        length = len(raw_text.strip())
-        if length == 0:
-            return 0.0
-        if length < 40:
-            return 0.4
-        if length < 120:
-            return 0.7
-        return 0.92
 
-    def _cache_key(self, file_bytes: bytes, filename: str, document_type: str) -> str:
-        digest = hashlib.sha256(file_bytes).hexdigest()
-        return f"{digest}:{filename}:{document_type}"
+async def extract_document(image_bytes: bytes) -> OCRResult:
+    """Extract structured KYC fields from a document image using Mistral.
 
-    def _cache_path(self, cache_key: str) -> Path:
-        safe = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()
-        return self.cache_dir / f"{safe}.json"
+    The pipeline base64-encodes the image, measures its dimensions, calls the
+    Mistral vision chat model with a strict JSON system prompt, parses the
+    response, computes the portrait photo region, fills the AD date of birth
+    for citizenship cards, and scores confidence.
 
-    def _read_cache(self, cache_key: str) -> Optional[OCRResult]:
-        path = self._cache_path(cache_key)
-        if not path.exists():
-            return None
-        try:
-            data = json.loads(path.read_text())
-            expires_at = data.get("expires_at")
-            if not expires_at:
-                return None
-            if datetime.now(timezone.utc).timestamp() > expires_at:
-                return None
-            return OCRResult(
-                extracted_data=data.get("extracted_data", {}),
-                ocr_metadata=data.get("ocr_metadata", {}),
-                raw_text=data.get("raw_text", ""),
-            )
-        except Exception:
-            return None
+    Any failure is captured and returned as an ``unknown`` result with the
+    error message in ``raw_text`` and ``confidence_score`` of ``0.0`` — this
+    function does not raise.
 
-    def _write_cache(self, cache_key: str, result: OCRResult) -> None:
-        path = self._cache_path(cache_key)
-        payload = {
-            "expires_at": datetime.now(timezone.utc).timestamp() + CACHE_TTL_SECONDS,
-            "extracted_data": result.extracted_data,
-            "ocr_metadata": result.ocr_metadata,
-            "raw_text": result.raw_text,
-        }
-        path.write_text(json.dumps(payload))
+    Args:
+        image_bytes: Raw image content (jpeg/png/webp) as bytes.
 
-    def _image_to_base64(self, image: Image.Image) -> str:
-        with self._bytes_to_file(b"") as buffer:
-            image.save(buffer, format="PNG")
-            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    Returns:
+        A populated :class:`OCRResult`.
+    """
+    start = time.perf_counter()
+    raw_text = ""
+    try:
+        # Lazy import keeps app startup fast and avoids import errors leaking.
+        from mistralai.client import Mistral
 
-    def _bytes_to_file(self, data: bytes):
-        import io
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        width, height = _image_dimensions(image_bytes)
+        mime = _detect_mime(image_bytes)
 
-        return io.BytesIO(data)
+        client = Mistral(api_key=settings.MISTRAL_API_KEY)
+        response = await client.chat.complete_async(
+            model=settings.MISTRAL_MODEL,
+            messages=_build_messages(image_b64, mime),
+            temperature=0,
+        )
+        raw_text = response.choices[0].message.content or ""
 
-    def _log_result(self, request_id: str, result: OCRResult) -> None:
-        masked = self._mask_sensitive(result.extracted_data)
-        logger.info(
-            "Mistral OCR completed",
-            extra={
-                "request_id": request_id,
-                "extracted_data": masked,
-                "ocr_metadata": result.ocr_metadata,
-            },
+        parsed: Dict[str, Any] = json.loads(_strip_json_fences(raw_text))
+        document_type = parsed.get("document_type", "unknown")
+        if document_type not in ("citizenship", "nid", "unknown"):
+            document_type = "unknown"
+
+        fields = {k: v for k, v in parsed.items() if k != "document_type"}
+
+        # Force all numeric fields to Western Arabic digits.
+        fields = _normalize_numeric_fields(fields)
+
+        # Deterministically (re)compute the AD date of birth for citizenship
+        # cards from the BS date using the project rule.
+        if document_type == "citizenship":
+            ad = _bs_to_ad(fields.get("date_of_birth_bs", ""))
+            if ad:
+                fields["date_of_birth_ad"] = ad
+
+        # For NID, guarantee full_name = "<given name> <surname>" in both
+        # scripts even if the model left the combined field blank.
+        if document_type == "nid":
+            fields = _compose_nid_full_name(fields)
+
+        photo_region = _compute_photo_region(document_type, width, height)
+        confidence = (
+            _score_confidence(document_type, fields)
+            if document_type != "unknown"
+            else 0.10
         )
 
-    def _mask_sensitive(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        masked = dict(data)
-        if masked.get("document_number"):
-            masked["document_number"] = self._mask_value(str(masked["document_number"]))
-        if masked.get("address"):
-            masked["address"] = self._mask_value(str(masked["address"]))
-        return masked
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return OCRResult(
+            document_type=document_type,
+            extracted_fields=fields,
+            raw_text=raw_text,
+            confidence_score=confidence,
+            processing_time_ms=elapsed_ms,
+            photo_region=photo_region,
+            thumbnail_region=None,
+        )
+    except Exception as exc:  # noqa: BLE001 - never raise; return unknown
+        logger.exception("Mistral OCR extraction failed")
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        detail = raw_text or f"{type(exc).__name__}: {exc}"
+        return OCRResult(
+            document_type="unknown",
+            extracted_fields={},
+            raw_text=detail,
+            confidence_score=0.0,
+            processing_time_ms=elapsed_ms,
+            photo_region=None,
+            thumbnail_region=None,
+        )
 
-    def _mask_value(self, value: str) -> str:
-        if len(value) <= 4:
-            return "*" * len(value)
-        return "*" * (len(value) - 4) + value[-4:]
+
+def supported_documents() -> List[Dict[str, Any]]:
+    """Return the supported document types and their extractable fields."""
+    return [
+        {
+            "document_type": "citizenship",
+            "fields": [
+                "citizenship_number",
+                "full_name_nepali",
+                "full_name_english",
+                "gender",
+                "date_of_birth_bs",
+                "date_of_birth_ad",
+                "birth_place_district",
+                "birth_place_district_english",
+                "birth_place_vdc",
+                "birth_place_vdc_english",
+                "permanent_address_district",
+                "permanent_address_district_english",
+                "permanent_address_municipality",
+                "permanent_address_municipality_english",
+                "ward_number",
+                "issued_district",
+                "issued_district_english",
+            ],
+        },
+        {
+            "document_type": "nid",
+            "fields": [
+                "nin",
+                "surname_nepali",
+                "surname_english",
+                "given_name_nepali",
+                "given_name_english",
+                "full_name_nepali",
+                "full_name_english",
+                "gender",
+                "date_of_birth_ad",
+                "date_of_birth_bs",
+                "nationality",
+                "date_of_issue",
+                "mobile_number",
+            ],
+        },
+    ]

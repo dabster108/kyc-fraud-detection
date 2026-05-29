@@ -26,9 +26,25 @@ class Settings(BaseSettings):
     
     # File settings
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    
+
+    # PaddleOCR settings
+    PADDLE_OCR_LANG: str = "en"
+    PADDLE_OCR_USE_GPU: bool = False
+    MAX_UPLOAD_SIZE_MB: int = 10
+    FORGED_JSON_PATH: str = "/Users/dikshanta/Documents/kyc-fraud-detection/backend/ml-services/forged.json"
+
+    # Mistral OCR settings
+    MISTRAL_API_KEY: str = ""
+    # NOTE: "mistral-ocr-latest" is the pure-OCR endpoint and is NOT compatible
+    # with the chat/system-prompt JSON extraction used here. A vision-capable
+    # chat model is required (e.g. pixtral-12b-2409, mistral-small-latest).
+    MISTRAL_MODEL: str = "pixtral-12b-2409"
+    MAX_UPLOAD_MB: int = 10
+
     class Config:
-        env_file = Path(__file__).parent.parent.parent.parent / ".env"
+        # The project's single .env lives at the repository root, five levels
+        # up from this file (app/core -> app -> ml-services -> backend -> root).
+        env_file = Path(__file__).resolve().parents[4] / ".env"
         env_file_encoding = 'utf-8'
         case_sensitive = True
 
