@@ -1,11 +1,5 @@
-/** @type {import('next').NextConfig} */
+// next.config.js
 const nextConfig = {
-  reactStrictMode: false,
-
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-
   turbopack: {
     root: __dirname,
   },
