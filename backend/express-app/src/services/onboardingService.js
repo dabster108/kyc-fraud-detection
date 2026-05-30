@@ -1206,6 +1206,10 @@ class OnboardingService {
       ...dupFlags,
       ...editComparison.flags,
       ...docDupFlags,
+      ocr_edit_comparison: {
+        flags: editComparison.flags,
+        score: editComparison.score,
+      },
     };
     const newRiskScore = Math.min(
       Math.round(existingRiskScore + dupScore + editComparison.score + docDupScore),
@@ -1231,8 +1235,9 @@ class OnboardingService {
          permanent_province = $20, permanent_district = $21, permanent_municipality = $22,
          permanent_ward = $23, permanent_street = $24,
          document_number = $25, document_issued_date = $26, document_issued_place = $27,
-         risk_score = $28, risk_flags = $29::jsonb, status = 'step_2_complete'
-       WHERE id = $30`,
+         document_type = COALESCE($28, document_type),
+         risk_score = $29, risk_flags = $30::jsonb, status = 'step_2_complete'
+       WHERE id = $31`,
       [
         (formData.fullName || "").trim(),
         formData.dob || null,
@@ -1261,6 +1266,7 @@ class OnboardingService {
         formData.documentNumber?.trim() || null,
         formData.documentIssuedDate?.trim() || null,
         formData.documentIssuedPlace?.trim() || null,
+        formData.documentType || session.document_type || null,
         newRiskScore,
         JSON.stringify(mergedRiskFlags),
         sessionId,

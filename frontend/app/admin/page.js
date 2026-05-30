@@ -37,15 +37,22 @@ export default function AdminPanelPage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [docFilter, setDocFilter] = useState("All");
   const [loadError, setLoadError] = useState("");
+  const [isLoadingList, setIsLoadingList] = useState(false);
 
   const loadSubmissions = async () => {
+    setIsLoadingList(true);
     try {
       setLoadError("");
       const rows = await fetchSubmissions();
       setSubmissions(rows);
     } catch (err) {
-      setLoadError(err.message || "Could not load submissions from server.");
+      setLoadError(
+        err.message ||
+          "Could not load submissions. Is the Express API running on port 5000?"
+      );
       setSubmissions([]);
+    } finally {
+      setIsLoadingList(false);
     }
   };
 
@@ -209,6 +216,12 @@ export default function AdminPanelPage() {
           {loadError ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {loadError}
+            </div>
+          ) : null}
+          {!loadError && !isLoadingList && submissions.length === 0 ? (
+            <div className="mb-4 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 text-sm text-[#64748B]">
+              No submissions in the database yet. Complete an onboarding flow (document → review → face verify)
+              while the Express backend is running, then click Refresh.
             </div>
           ) : null}
           {/* ── OVERVIEW ── */}
@@ -400,7 +413,7 @@ export default function AdminPanelPage() {
                                 {item.name?.split(" ").map((p) => p[0]).slice(0, 2).join("")}
                               </div>
                               <div>
-                                <p className="font-semibold text-[#0B1324]">{item.name}</p>
+                                <p className="font-semibold text-[#0B1324]">{item.name || "—"}</p>
                                 <p className="text-xs text-[#94A3B8]">{item.email}</p>
                               </div>
                             </div>

@@ -513,6 +513,7 @@ export default function OnboardingPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...formData,
+              documentType,
               deviceFingerprint: deviceFingerprint || null,
               submissionSpeedMs,
             }),
@@ -1098,20 +1099,6 @@ export default function OnboardingPage() {
                     </li>
                   )}
                 </ul>
-              </div>
-            ) : null}
-
-            {Object.keys(riskFlags).length > 0 ? (
-              <div className="w-full max-w-4xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-800">
-                  Heads up — we found some similarities with existing records.
-                </p>
-                <p className="mt-1 text-xs text-amber-700">
-                  Your application will go through additional review. This does not prevent you from continuing.
-                  {riskFlags.previous_email_attempts > 0
-                    ? ` We noticed ${riskFlags.previous_email_attempts} previous attempt(s) with this email.`
-                    : ""}
-                </p>
               </div>
             ) : null}
 

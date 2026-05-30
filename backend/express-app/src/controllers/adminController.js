@@ -1,58 +1,5 @@
 const pool = require("../services/dbClient");
-
-function mapSessionRow(row) {
-  const riskScore = Math.round(Number(row.risk_score) || 0);
-  let status = "Pending";
-  if (row.status === "approved") status = "Approved";
-  else if (row.status === "rejected") status = "Rejected";
-  else if (riskScore >= 70) status = "Flagged";
-
-  const forgeryResult =
-    typeof row.forgery_result === "string"
-      ? JSON.parse(row.forgery_result)
-      : row.forgery_result || {};
-  const ocrResult =
-    typeof row.ocr_result === "string"
-      ? JSON.parse(row.ocr_result)
-      : row.ocr_result || {};
-
-  return {
-    id: row.id,
-    sessionId: row.id,
-    name: row.full_name,
-    email: row.email,
-    phone: row.phone_number,
-    dob: row.dob,
-    gender: row.gender,
-    nationality: row.nationality,
-    status,
-    riskScore,
-    riskFlags: row.risk_flags || {},
-    faceSimilarity: row.face_similarity,
-    faceIsMatch:
-      row.face_similarity != null ? row.face_similarity >= 0.65 : null,
-    submittedAt: row.updated_at || row.created_at,
-    createdAt: row.created_at,
-    channel: "Web",
-    documentType: row.document_type,
-    documentNumber: row.document_number,
-    documentUrl: row.document_url,
-    documentBackUrl: row.document_back_url,
-    documentFaceUrl: row.document_face_url,
-    selfieUrl: row.selfie_url,
-    ocrName: row.ocr_name,
-    ocrDocumentNumber: row.ocr_document_number,
-    ocrData: Object.keys(ocrResult).length
-      ? { extractedFields: ocrResult.extracted_fields || ocrResult }
-      : null,
-    forgeryDecision: forgeryResult.decision || null,
-    forgeryScore: forgeryResult.forgery_score ?? null,
-    forgeryDetails: forgeryResult.details ? forgeryResult : null,
-    deviceFingerprint: row.device_fingerprint,
-    ipAddress: row.ip_address,
-    dbStatus: row.status,
-  };
-}
+const { mapOnboardingSession } = require("../utils/mapOnboardingSession");
 
 /**
  * GET /api/v1/admin/submissions
@@ -62,17 +9,9 @@ exports.getAllSubmissions = async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
     const { rows } = await pool.query(
-      `SELECT
-         id, full_name, email, phone_number, dob, gender, nationality,
-         document_type, document_number,
-         document_url, document_back_url, document_face_url, selfie_url,
-         risk_score, risk_flags, face_similarity,
-         ocr_name, ocr_document_number, ocr_result,
-         forgery_result,
-         device_fingerprint, ip_address,
-         status, created_at, updated_at
+      `SELECT *
        FROM   onboarding_sessions
-       WHERE  status NOT IN ('expired')
+       WHERE  status IS DISTINCT FROM 'expired'
        ORDER  BY updated_at DESC NULLS LAST, created_at DESC
        LIMIT  $1`,
       [limit]
@@ -81,7 +20,7 @@ exports.getAllSubmissions = async (req, res) => {
     return res.json({
       success: true,
       count: rows.length,
-      submissions: rows.map(mapSessionRow),
+      submissions: rows.map(mapOnboardingSession).filter(Boolean),
     });
   } catch (error) {
     console.error("[admin] getAllSubmissions error:", error.message);
@@ -96,14 +35,7 @@ exports.getAllSubmissions = async (req, res) => {
 exports.getPendingSubmissions = async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT
-         id, full_name, email, phone_number, dob, nationality,
-         document_type, document_number,
-         document_url, document_face_url, selfie_url,
-         risk_score, risk_flags,
-         face_similarity, ocr_name, ocr_document_number,
-         device_fingerprint, ip_address, submission_speed_ms, retry_count,
-         status, created_at, updated_at
+      `SELECT *
        FROM   onboarding_sessions
        WHERE  status = 'submitted'
        ORDER  BY risk_score DESC, created_at ASC`
@@ -112,7 +44,7 @@ exports.getPendingSubmissions = async (req, res) => {
     return res.json({
       success: true,
       count: rows.length,
-      submissions: rows.map(mapSessionRow),
+      submissions: rows.map(mapOnboardingSession).filter(Boolean),
     });
   } catch (error) {
     console.error("[admin] getPendingSubmissions error:", error.message);
@@ -135,7 +67,7 @@ exports.getSubmissionDetails = async (req, res) => {
       return res.status(404).json({ success: false, error: "Submission not found" });
     }
 
-    return res.json({ success: true, submission: mapSessionRow(rows[0]) });
+    return res.json({ success: true, submission: mapOnboardingSession(rows[0]) });
   } catch (error) {
     console.error("[admin] getSubmissionDetails error:", error.message);
     return res.status(500).json({ error: error.message });

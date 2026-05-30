@@ -139,6 +139,7 @@ export default function SubmissionDetailPage() {
   const submissionId = Array.isArray(routeParams?.id) ? routeParams.id[0] : routeParams?.id;
   const [submission, setSubmission] = useState(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [actionMsg, setActionMsg] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -148,9 +149,15 @@ export default function SubmissionDetailPage() {
     (async () => {
       try {
         const row = await fetchSubmissionById(submissionId);
-        if (!cancelled) setSubmission(row);
-      } catch {
-        if (!cancelled) setSubmission(null);
+        if (!cancelled) {
+          setSubmission(row);
+          setLoadError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSubmission(null);
+          setLoadError(err.message || "Could not load submission from server.");
+        }
       } finally {
         if (!cancelled) setHasLoaded(true);
       }
@@ -214,7 +221,9 @@ export default function SubmissionDetailPage() {
       <div className="flex min-h-screen items-center justify-center bg-[#F1F5F9]">
         <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
           <h1 className="text-xl font-bold text-[#0B1324]">Submission not found</h1>
-          <p className="mt-2 text-sm text-[#64748B]">The KYC submission could not be located.</p>
+          <p className="mt-2 text-sm text-[#64748B]">
+            {loadError || "The KYC submission could not be located in the database."}
+          </p>
           <Link href="/admin" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-2 text-sm font-bold text-white">
             <ChevronLeftIcon className="h-4 w-4" /> Back to dashboard
           </Link>
