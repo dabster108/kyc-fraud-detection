@@ -27,7 +27,9 @@ Detects forged documents, duplicate identities, and suspicious onboarding behavi
   - [2. Face Extraction — InsightFace ArcFace](#2-face-extraction--insightface-arcface)
   - [3. Duplicate Detection — pgvector Cosine Similarity](#3-duplicate-detection--pgvector-cosine-similarity)
   - [4. Forgery Detection — 6-Check Pipeline](#4-forgery-detection--6-check-pipeline)
+  - [5. Liveness Detection — Client-Side + FastAPI](#5-liveness-detection--client-side--fastapi)
 - [Decision Thresholds](#decision-thresholds)
+- [Liveness Detection (Standalone Demo)](#liveness-detection-standalone-demo)
 - [Getting Started](#getting-started)
 - [Environment Variables](#environment-variables)
 - [Repository Structure](#repository-structure)
@@ -46,7 +48,8 @@ Upload ID Document
         │
         ├──► OCR (Mistral)        → Structured fields (name, DOB, document number …)
         ├──► Face Extraction      → 512-dim ArcFace embedding → duplicate check
-        └──► Forgery Detection    → 6-check weighted score → genuine / suspicious / forged
+        ├──► Forgery Detection    → 6-check weighted score → genuine / suspicious / forged
+        └──► Liveness (browser)   → blink + head-movement → POST /liveness/verify → LIVE / SPOOF
                                             │
                                             ▼
                                    Risk Score per Submission
@@ -60,7 +63,8 @@ Upload ID Document
 - **Document OCR** — Extracts structured fields from Nepali Citizenship Cards, National ID Cards, and Driving Licenses using the Mistral `pixtral-12b-2409` vision model; handles Devanagari script and BS→AD date conversion
 - **Face Identity Deduplication** — InsightFace `buffalo_l` generates a 512-dim ArcFace embedding; pgvector cosine similarity finds duplicate identities across all prior submissions in sub-linear time
 - **Forgery Detection** — Six weighted forensic checks (ELA, EXIF metadata, font consistency, noise pattern, copy-move, edge analysis) produce a composite 0–100 forgery score
-- **Full Audit Trail** — Every embedding, OCR result, and forgery score is persisted to Supabase (PostgreSQL); document and face images stored on Cloudinary
+- **Liveness Detection** — Browser-based blink + head-movement challenge using face-api.js (68-point landmarks); FastAPI evaluates signals and optionally persists to `liveness_results`
+- **Full Audit Trail** — Every embedding, OCR result, forgery score, and liveness result is persisted to Supabase (PostgreSQL); document and face images stored on Cloudinary
 - **Resilient Design** — Every ML pipeline catches all failures internally; errors surface as structured response fields, not HTTP 500s
 
 ---
@@ -74,7 +78,8 @@ Upload ID Document
 - **Frontend Layer** — Next.js 16 (React 19 · Tailwind CSS · FingerprintJS) communicates with the backend over REST API
 - **Orchestration Layer** — Express.js Backend (Node.js) routes traffic across KYC Routes, Admin Routes, and Onboarding Routes; forwards ML tasks to FastAPI over HTTP
 - **ML Services Layer (FastAPI · Python)** — three parallel services: InsightFace `buffalo_l` (ArcFace 512-dim + RetinaFace), Mistral OCR Service (pixtral-12b-2409), and Forgery Detector (6-check pipeline)
-- **Data & Storage Layer** — Supabase PostgreSQL + pgvector (`kyc_submissions · face_embeddings (vector 512) · ocr_results · forgery_results · kyc_details`); Cloudinary CDN for original ID images and cropped face images
+- **Data & Storage Layer** — Supabase PostgreSQL + pgvector (`kyc_submissions · face_embeddings (vector 512) · ocr_results · forgery_results · kyc_details · liveness_results`); Cloudinary CDN for original ID images and cropped face images
+- **Liveness Demo** — Standalone `liveness.html` at repo root (no npm build); opens directly in Chrome and talks to FastAPI on `:8000`
 
 ---
 
@@ -265,6 +270,71 @@ forgery_score = ELA×0.47 + EXIF×0.20 + Font×0.10 + Noise×0.10 + CopyMove×0.
 
 ---
 
+### 5. Liveness Detection — Client-Side + FastAPI
+
+Liveness is a **two-part** system: the browser captures behavioural signals; the ML service applies deterministic rules and optionally saves the result.
+
+```
+liveness.html (Chrome)
+    │
+    ├── face-api.js (CDN)
+    │     ├── ssdMobilenetv1      → face bounding box
+    │     └── faceLandmark68Net   → 68 facial landmark points
+    │
+    ├── Detection loop (~70 ms)
+    │     ├── Blink: adaptive EAR (Eye Aspect Ratio) vs calibrated baseline
+    │     └── Movement: nose-tip (landmark 30) direction changes (left ↔ right)
+    │
+    └── After 10 s window → POST /api/v1/liveness/verify
+              │
+              ▼
+    FastAPI (backend/ml-services)
+              │
+              ├── Threshold rules → LIVE | SPOOF | INSUFFICIENT_DATA
+              └── Optional: INSERT into liveness_results (if submission_id sent)
+```
+
+**Why client-side detection?** Blink and micro-movement signals are time-series data best captured in real time from the webcam. The backend receives only aggregated counts — no video upload — keeping latency low and the API simple.
+
+**Blink detection (adaptive EAR):**
+
+| Step | Detail |
+|---|---|
+| Calibrate | Track an open-eye EAR baseline per user (exponential moving average) |
+| Closed | `avgEAR < baseline × 0.75` |
+| Count | Increment when eyes reopen after being closed (not while closed) |
+
+**Head movement detection:**
+
+| Step | Detail |
+|---|---|
+| Track | Nose tip = landmark point 30 |
+| Threshold | Horizontal shift > 8 px between frames |
+| Count | Only on **direction change** (left→right or right→left), not continuous drift |
+
+**Backend decision rules (`POST /api/v1/liveness/verify`):**
+
+| Condition | Decision | `is_live` | Confidence |
+|---|---|---|---|
+| `duration_seconds < 5` | `INSUFFICIENT_DATA` | false | 0.0 |
+| blinks ≥ 2 **and** movements ≥ 3 | `LIVE` | true | 0.0–1.0 (weighted) |
+| only one threshold met | `SPOOF` | false | 0.3 |
+| neither threshold met | `SPOOF` | false | 0.0 |
+
+**Integration points:**
+
+| Component | Path | Role |
+|---|---|---|
+| Standalone UI | `liveness.html` | Demo / testing; open in Chrome |
+| FastAPI router | `app/api/endpoints/liveness.py` | `POST /verify` |
+| App registration | `app/main.py` | `app.include_router(liveness_router, prefix="/api/v1")` |
+| Migration | `migrations/001_create_kyc_details.sql` | `liveness_results` table |
+| Frontend onboarding | `frontend/app/onboarding/page.js` | Face step (separate from liveness demo) |
+
+To link liveness to a KYC submission, pass `submission_id` in the verify request body; the endpoint persists to Supabase on a best-effort basis (failures are logged, never block the HTTP response).
+
+---
+
 ## Decision Thresholds
 
 **Forgery score → decision:**
@@ -292,6 +362,15 @@ forgery_score = ELA×0.47 + EXIF×0.20 + Font×0.10 + Noise×0.10 + CopyMove×0.
 | EXIF missing `DateTimeOriginal` | +20 pts |
 | Font CV | `max(0, (CV − 0.55) / 0.35) × 100` |
 | Copy-move | `min(suspicious_ratio × 300, 100)` |
+
+**Liveness → decision:**
+
+| Signal | Minimum | Result if failed alone |
+|---|---|---|
+| Blinks | 2 | Contributes to `SPOOF` (confidence 0.3 if movement passed) |
+| Head movements | 3 | Same |
+| Duration | 5 s | `INSUFFICIENT_DATA` |
+| Both blink + movement | — | `LIVE` with confidence up to 1.0 |
 
 ---
 
@@ -357,6 +436,75 @@ npm install
 npm run dev
 ```
 
+### 7. Run Liveness Demo (standalone)
+
+No frontend build required — open the HTML file directly in Chrome:
+
+1. Ensure ML Services is running on **port 8000** (step 4 above).
+2. Allow camera access when prompted.
+3. Open in Chrome:
+
+```bash
+open liveness.html
+# or: file:///path/to/kyc-fraud-detection/liveness.html
+```
+
+The page loads face-api.js weights from jsDelivr (`justadudewhohacks/face-api.js@master/weights`), runs a 10-second verification window, then POSTs to `http://localhost:8000/api/v1/liveness/verify`.
+
+**Model CDN note:** Use the GitHub-hosted weights URL, not `npm/face-api.js/weights` (that path returns 404).
+
+---
+
+## Liveness Detection (Standalone Demo)
+
+| Item | Value |
+|---|---|
+| File | `liveness.html` (repo root) |
+| Backend | `POST http://localhost:8000/api/v1/liveness/verify` |
+| Models | face-api.js — `ssdMobilenetv1` + `faceLandmark68Net` only |
+| Build | None — single HTML file, CDN scripts |
+
+**Request body (sent automatically after 10 s):**
+
+```json
+{
+  "blink_count": 3,
+  "movement_count": 5,
+  "duration_seconds": 10,
+  "submission_id": "optional-uuid"
+}
+```
+
+**Example response:**
+
+```json
+{
+  "is_live": true,
+  "decision": "LIVE",
+  "blink_count": 3,
+  "movement_count": 5,
+  "blink_threshold": 2,
+  "movement_threshold": 3,
+  "duration_seconds": 10,
+  "confidence_score": 1.0,
+  "details": {
+    "blink_passed": true,
+    "movement_passed": true,
+    "duration_passed": true,
+    "blink_score": 3,
+    "movement_score": 5
+  },
+  "submission_id": null
+}
+```
+
+**UI behaviour:**
+
+- Camera + 68 landmark dots run **continuously** (not only during the 10 s window).
+- Stats: blinks, countdown timer, head movements update in real time.
+- At 10 s: auto-submit once; result card shows LIVE (green) or SPOOF (red).
+- **Try Again** resets counts and starts a new verification window.
+
 ---
 
 ## Environment Variables
@@ -398,6 +546,7 @@ MISTRAL_API_KEY=your-mistral-api-key
 kyc-fraud-detection/
 │
 ├── .env                                  # Shared env for all services
+├── liveness.html                         # Standalone liveness demo (open in Chrome)
 │
 ├── frontend/                             # Next.js 16 application
 │   ├── app/
@@ -426,6 +575,7 @@ kyc-fraud-detection/
 │       │   ├── api/endpoints/
 │       │   │   ├── face.py               # POST /face/extract
 │       │   │   ├── forgery.py            # POST /forgery/verify
+│       │   │   ├── liveness.py           # POST /liveness/verify
 │       │   │   ├── ocr.py                # POST /ocr/extract
 │       │   │   └── health.py             # GET  /health  GET /ready
 │       │   ├── services/
@@ -441,6 +591,8 @@ kyc-fraud-detection/
 │       │       └── migrations/
 │       │           ├── 001_face_embeddings.sql           # Tables + IVFFlat index
 │       │           └── 002_match_face_embeddings_fn.sql  # Supabase RPC fallback fn
+│       └── migrations/
+│           └── 001_create_kyc_details.sql                # kyc_details + liveness_results
 │       └── pyproject.toml
 │
 └── README.md
@@ -463,6 +615,39 @@ kyc-fraud-detection/
 | `POST` | `/api/v1/forgery/verify-base64` | Same — base64 input |
 | `POST` | `/api/v1/face/extract` | Detect face, generate embedding, check duplicates |
 | `GET` | `/api/v1/face/latest` | Most recent face embedding with linked OCR data |
+| `POST` | `/api/v1/liveness/verify` | Evaluate blink + movement liveness signals (JSON) |
+
+**Liveness verify (`POST /api/v1/liveness/verify`):**
+
+```json
+// Request
+{
+  "blink_count": 3,
+  "movement_count": 5,
+  "duration_seconds": 10,
+  "submission_id": "optional-uuid"
+}
+
+// Response
+{
+  "is_live": true,
+  "decision": "LIVE",
+  "blink_count": 3,
+  "movement_count": 5,
+  "blink_threshold": 2,
+  "movement_threshold": 3,
+  "duration_seconds": 10,
+  "confidence_score": 1.0,
+  "details": {
+    "blink_passed": true,
+    "movement_passed": true,
+    "duration_passed": true,
+    "blink_score": 3,
+    "movement_score": 5
+  },
+  "submission_id": null
+}
+```
 
 **Duplicate detected response (`POST /api/v1/face/extract`):**
 
@@ -561,6 +746,19 @@ CREATE TABLE kyc_details (
   risk_score    INTEGER DEFAULT 0,
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Liveness verification results (blink + head movement)
+CREATE TABLE liveness_results (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  submission_id     UUID,
+  is_live           BOOLEAN,
+  decision          TEXT,   -- LIVE | SPOOF | INSUFFICIENT_DATA
+  blink_count       INT,
+  movement_count    INT,
+  confidence_score  FLOAT,
+  duration_seconds  FLOAT,
+  created_at        TIMESTAMPTZ DEFAULT now()
 );
 ```
 
