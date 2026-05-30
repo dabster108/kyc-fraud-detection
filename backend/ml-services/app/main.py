@@ -7,6 +7,7 @@ from app.api.endpoints import health
 from app.api.endpoints.ocr import router as ocr_router
 from app.api.endpoints.forgery import router as forgery_router
 from app.api.endpoints.face import router as face_router
+from app.api.endpoints.liveness import router as liveness_router
 from app.database.supabase_client import get_db_pool
 from app.services import face_extractor
 import app.database.supabase_client as db_client
@@ -26,6 +27,7 @@ app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(ocr_router, prefix="/api/v1", tags=["OCR"])
 app.include_router(forgery_router, prefix="/api/v1", tags=["Forgery"])
 app.include_router(face_router, prefix="/api/v1", tags=["Face"])
+app.include_router(liveness_router, prefix="/api/v1", tags=["Liveness"])
 
 
 async def _load_models_background() -> None:
@@ -77,5 +79,6 @@ async def root():
             "/api/v1/forgery/verify-base64",
             "/api/v1/face/extract",
             "/api/v1/face/latest",
+            "/api/v1/liveness/verify",
         ]
     }

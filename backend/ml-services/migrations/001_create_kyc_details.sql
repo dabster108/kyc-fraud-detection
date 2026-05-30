@@ -103,3 +103,23 @@ CREATE TRIGGER update_kyc_details_updated_at
 GRANT ALL ON kyc_details TO service_role;
 GRANT SELECT, INSERT ON kyc_details TO anon;
 GRANT SELECT, INSERT, UPDATE ON kyc_details TO authenticated;
+
+-- Liveness Detection Results Table
+CREATE TABLE IF NOT EXISTS liveness_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  submission_id UUID,
+  is_live BOOLEAN,
+  decision TEXT,
+  blink_count INT,
+  movement_count INT,
+  confidence_score FLOAT,
+  duration_seconds FLOAT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_liveness_results_submission_id ON liveness_results(submission_id);
+CREATE INDEX IF NOT EXISTS idx_liveness_results_created_at ON liveness_results(created_at DESC);
+
+GRANT ALL ON liveness_results TO service_role;
+GRANT SELECT, INSERT ON liveness_results TO anon;
+GRANT SELECT, INSERT, UPDATE ON liveness_results TO authenticated;

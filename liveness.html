@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Liveness Detection</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0f1a;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .card {
+    width: 800px;
+    max-width: 100%;
+    background: #111827;
+    border-radius: 20px;
+    padding: 32px;
+  }
+
+  .card-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  .card-subtitle {
+    color: #94a3b8;
+    text-align: center;
+    margin-top: 6px;
+    font-size: 0.95rem;
+  }
+
+  .camera-section {
+    display: flex;
+    justify-content: center;
+    margin-top: 24px;
+  }
+
+  .camera-container {
+    position: relative;
+    display: inline-block;
+    width: 640px;
+    height: 480px;
+    max-width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #0a0f1a;
+    border: 1px solid #1e293b;
+  }
+
+  #video {
+    width: 640px;
+    height: 480px;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1);
+  }
+
+  #overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    transform: scaleX(-1);
+  }
+
+  .face-warning {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 15, 26, 0.65);
+    color: #ffaa00;
+    font-size: 1.1rem;
+    font-weight: 600;
+    z-index: 2;
+  }
+  .face-warning.show { display: flex; }
+
+  .stats-bar {
+    display: flex;
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  .stat-box {
+    flex: 1;
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: box-shadow 0.3s ease;
+  }
+
+  .stat-number {
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #64748b;
+    transition: color 0.3s ease;
+  }
+
+  .stat-number.green { color: #00ff88; }
+  .stat-number.blue { color: #00d4ff; }
+  .stat-number.orange { color: #ffaa00; }
+
+  .stat-box.active { box-shadow: 0 0 20px #00ff8820; }
+
+  .stat-label {
+    margin-top: 10px;
+    font-size: 0.95rem;
+    color: #e2e8f0;
+    font-weight: 600;
+  }
+
+  .stat-hint {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+
+  .progress-container {
+    height: 4px;
+    background: #0f172a;
+    border-radius: 2px;
+    margin-top: 12px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #00d4ff;
+    transition: width 1s linear;
+  }
+
+  .instruction {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #00d4ff;
+    min-height: 28px;
+  }
+
+  .result-card {
+    margin-top: 24px;
+    border-radius: 16px;
+    padding: 28px;
+    text-align: center;
+    transform: translateY(100px);
+    opacity: 0;
+    transition: all 0.5s ease;
+    pointer-events: none;
+    display: none;
+  }
+
+  .result-card.visible {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+    display: block;
+  }
+
+  .result-card.live {
+    background: linear-gradient(135deg, #064e3b, #047857);
+    border: 1px solid #00ff88;
+  }
+
+  .result-card.spoof {
+    background: linear-gradient(135deg, #5b1414, #991b1b);
+    border: 1px solid #ff4444;
+  }
+
+  .result-card.processing {
+    background: #1e293b;
+    border: 1px solid #334155;
+  }
+
+  .result-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+  }
+
+  .result-detail {
+    margin-top: 10px;
+    font-size: 1rem;
+    color: #e2e8f0;
+  }
+
+  .result-sub {
+    margin-top: 6px;
+    font-size: 0.9rem;
+    color: #cbd5e1;
+  }
+
+  .try-again {
+    background: #1e293b;
+    color: #fff;
+    border: none;
+    padding: 12px 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 16px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: background 0.2s ease;
+  }
+  .try-again:hover { background: #334155; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-title">Liveness Detection</div>
+  <div class="card-subtitle">Please look at camera and follow instructions</div>
+
+  <div class="camera-section">
+    <div class="camera-container">
+      <video id="video" width="640" height="480" autoplay muted playsinline></video>
+      <canvas id="overlay" width="640" height="480"></canvas>
+      <div class="face-warning" id="face-warning">No face detected</div>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-box" id="blink-box">
+      <div class="stat-number" id="blink-number">0</div>
+      <div class="stat-label">Blinks Detected</div>
+      <div class="stat-hint">Need: 2 minimum</div>
+    </div>
+
+    <div class="stat-box" id="timer-box">
+      <div class="stat-number blue" id="timer-number">10</div>
+      <div class="stat-label">Seconds Remaining</div>
+      <div class="progress-container">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+
+    <div class="stat-box" id="movement-box">
+      <div class="stat-number" id="movement-number">0</div>
+      <div class="stat-label">Head Movements</div>
+      <div class="stat-hint">Need: 3 minimum</div>
+    </div>
+  </div>
+
+  <div class="instruction" id="instruction">Loading models...</div>
+
+  <div class="result-card" id="result-card">
+    <div class="result-title" id="result-title"></div>
+    <div class="result-detail" id="result-detail"></div>
+    <div class="result-sub" id="result-sub"></div>
+    <button class="try-again" id="try-again" onclick="resetAll()">Try Again</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ── Constants ─────────────────────────────────────────────────────────────
+  const MOVEMENT_THRESHOLD = 8;       // pixels the nose tip must move
+  const RECORDING_DURATION = 10;      // seconds — verification window length
+  const FASTAPI_URL = "http://localhost:8000/api/v1/liveness/verify";
+  const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+
+  // Minimums shown to the user (must mirror the backend thresholds).
+  const MIN_BLINKS = 2;
+  const MIN_MOVEMENTS = 3;
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  let blinkCount = 0;
+  let movementCount = 0;
+  let eyeOpen = true;
+  let earBaseline = null;    // adaptive open-eye EAR, calibrated per face/camera
+  let prevNoseX = null;
+  let prevNoseY = null;
+  let lastMovementDirection = null;
+  let isDetecting = false;   // camera + landmark loop runs continuously
+  let hasSubmitted = false;  // whether the current window already auto-verified
+  let startTime = null;
+  let detectionInterval = null;
+  let countdownInterval = null;
+  let modelsLoaded = false;
+
+  // Blink sensitivity — tuned to catch partial / quick blinks.
+  // Higher BLINK_RATIO = eyes count as "closed" sooner (more sensitive).
+  const BLINK_RATIO = 0.88;
+  // Also trigger when EAR drops this fraction below the open-eye baseline.
+  const BLINK_DROP_RATIO = 0.12;
+  const BLINK_COOLDOWN_MS = 160;      // min gap between counted blinks
+  let lastBlinkTime = 0;
+  let smoothedEAR = null;
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("overlay");
+  const ctx = canvas.getContext("2d");
+  const faceWarning = document.getElementById("face-warning");
+  const blinkNumber = document.getElementById("blink-number");
+  const blinkBox = document.getElementById("blink-box");
+  const movementNumber = document.getElementById("movement-number");
+  const movementBox = document.getElementById("movement-box");
+  const timerNumber = document.getElementById("timer-number");
+  const progressFill = document.getElementById("progress-fill");
+  const instruction = document.getElementById("instruction");
+  const resultCard = document.getElementById("result-card");
+  const resultTitle = document.getElementById("result-title");
+  const resultDetail = document.getElementById("result-detail");
+  const resultSub = document.getElementById("result-sub");
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function euclidean(p1, p2) {
+    return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+  }
+
+  function getEAR(eyePoints) {
+    const v1 = euclidean(eyePoints[1], eyePoints[5]);
+    const v2 = euclidean(eyePoints[2], eyePoints[4]);
+    const h = euclidean(eyePoints[0], eyePoints[3]);
+    return h === 0 ? 0 : (v1 + v2) / (2.0 * h);
+  }
+
+  function updateBlinkDisplay() {
+    blinkNumber.textContent = blinkCount;
+    if (blinkCount >= MIN_BLINKS) {
+      blinkNumber.classList.add("green");
+      blinkBox.classList.add("active");
+    }
+  }
+
+  function updateMovementDisplay() {
+    movementNumber.textContent = movementCount;
+    if (movementCount >= MIN_MOVEMENTS) {
+      movementNumber.classList.add("green");
+      movementBox.classList.add("active");
+    }
+  }
+
+  function updateInstruction() {
+    if (blinkCount < MIN_BLINKS) {
+      instruction.textContent = "\uD83D\uDC41 Please blink your eyes";
+    } else if (movementCount < MIN_MOVEMENTS) {
+      instruction.textContent = "\u2194 Please move your head left and right";
+    } else {
+      instruction.textContent = "\u2713 Keep still, processing...";
+    }
+  }
+
+  // ── Drawing ───────────────────────────────────────────────────────────────
+  function drawLandmarks(landmarks) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // All 68 points as small blue dots.
+    ctx.fillStyle = "#00d4ff";
+    for (let i = 0; i < landmarks.length; i++) {
+      ctx.beginPath();
+      ctx.arc(landmarks[i].x, landmarks[i].y, 2, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+
+    // Eye outlines (green).
+    drawOutline(landmarks.slice(36, 42), "#00ff88");
+    drawOutline(landmarks.slice(42, 48), "#00ff88");
+
+    // Nose tip (yellow, larger).
+    const nose = landmarks[30];
+    ctx.fillStyle = "#ffd400";
+    ctx.beginPath();
+    ctx.arc(nose.x, nose.y, 4, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  function drawOutline(points, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // ── Detection loop ────────────────────────────────────────────────────────
+  async function detectionLoop() {
+    if (!isDetecting || !modelsLoaded) return;
+
+    let detection;
+    try {
+      detection = await faceapi
+        .detectSingleFace(
+          video,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45 })
+        )
+        .withFaceLandmarks();
+    } catch (err) {
+      console.error("Detection error:", err);
+      return;
+    }
+
+    if (!detection) {
+      faceWarning.classList.add("show");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    faceWarning.classList.remove("show");
+
+    const landmarks = detection.landmarks.positions;
+    drawLandmarks(landmarks);
+
+    // ── Blink detection (adaptive + sensitive) ──
+    const leftEAR = getEAR(landmarks.slice(36, 42));
+    const rightEAR = getEAR(landmarks.slice(42, 48));
+    const avgEAR = (leftEAR + rightEAR) / 2;
+    const minEAR = Math.min(leftEAR, rightEAR);
+
+    // Calibrate open-eye baseline; only drift upward when eyes are clearly open.
+    if (earBaseline === null) {
+      earBaseline = avgEAR;
+    } else if (avgEAR > earBaseline * 0.90) {
+      earBaseline = earBaseline * 0.85 + avgEAR * 0.15;
+    }
+
+    // Light smoothing — still responsive to sudden drops.
+    if (smoothedEAR === null) {
+      smoothedEAR = avgEAR;
+    } else {
+      smoothedEAR = smoothedEAR * 0.55 + avgEAR * 0.45;
+    }
+
+    const dynThreshold = earBaseline * BLINK_RATIO;
+    const dropFromBaseline =
+      earBaseline > 0 ? (earBaseline - avgEAR) / earBaseline : 0;
+
+    // Closed if: average EAR low, either eye low, or noticeable drop from baseline.
+    const eyesClosed =
+      avgEAR < dynThreshold ||
+      minEAR < earBaseline * (BLINK_RATIO - 0.04) ||
+      dropFromBaseline >= BLINK_DROP_RATIO;
+
+    if (eyesClosed) {
+      eyeOpen = false;
+    } else {
+      // Eye reopened after being closed → count one blink (with cooldown).
+      if (eyeOpen === false) {
+        const now = Date.now();
+        if (now - lastBlinkTime >= BLINK_COOLDOWN_MS) {
+          blinkCount++;
+          lastBlinkTime = now;
+          updateBlinkDisplay();
+        }
+      }
+      eyeOpen = true;
+    }
+
+    // ── Movement detection (direction change only) ──
+    const noseTip = landmarks[30];
+    if (prevNoseX !== null) {
+      const deltaX = noseTip.x - prevNoseX;
+      if (Math.abs(deltaX) > MOVEMENT_THRESHOLD) {
+        const currentDir = deltaX > 0 ? "right" : "left";
+        if (currentDir !== lastMovementDirection) {
+          movementCount++;
+          lastMovementDirection = currentDir;
+          updateMovementDisplay();
+        }
+      }
+    }
+    prevNoseX = noseTip.x;
+    prevNoseY = noseTip.y;
+
+    updateInstruction();
+  }
+
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  // The timer counts down to the verification point but NEVER stops the loop.
+  // At zero it auto-submits once; counting + camera keep running continuously.
+  function startCountdown() {
+    startTime = Date.now();
+    hasSubmitted = false;
+    timerNumber.textContent = RECORDING_DURATION;
+    timerNumber.classList.remove("orange");
+    timerNumber.classList.add("blue");
+    progressFill.style.width = "0%";
+
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = setInterval(function () {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const remaining = Math.max(RECORDING_DURATION - elapsed, 0);
+
+      if (!hasSubmitted) {
+        timerNumber.textContent = Math.ceil(remaining);
+        progressFill.style.width =
+          Math.min((elapsed / RECORDING_DURATION) * 100, 100) + "%";
+        if (remaining < 3) {
+          timerNumber.classList.remove("blue");
+          timerNumber.classList.add("orange");
+        }
+      }
+
+      // Auto-verify once at the 10s mark, but keep counting afterwards so the
+      // counters and camera stay live (continuous).
+      if (remaining <= 0 && !hasSubmitted) {
+        hasSubmitted = true;
+        timerNumber.classList.remove("orange");
+        timerNumber.classList.add("green");
+        timerNumber.textContent = "\u2713";
+        submitResults();
+      }
+    }, 250);
+  }
+
+  // ── Submit + result ───────────────────────────────────────────────────────
+  async function submitResults() {
+    showProcessing();
+    try {
+      const response = await fetch(FASTAPI_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blink_count: blinkCount,
+          movement_count: movementCount,
+          duration_seconds: RECORDING_DURATION,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Server returned " + response.status);
+      const result = await response.json();
+      showResultCard(result);
+    } catch (err) {
+      console.error("Submit error:", err);
+      showBackendOffline();
+    }
+  }
+
+  function showProcessing() {
+    resultCard.className = "result-card processing visible";
+    resultTitle.textContent = "Processing...";
+    resultDetail.textContent = "Evaluating liveness signals.";
+    resultSub.textContent = "";
+  }
+
+  function showResultCard(result) {
+    if (result.is_live) {
+      resultCard.className = "result-card live visible";
+      resultTitle.textContent = "\u2713 Liveness Verified";
+      resultDetail.textContent =
+        "Confidence: " + Math.round(result.confidence_score * 100) + "%";
+      resultSub.textContent =
+        "Blinks: " + result.blink_count + " | Movements: " + result.movement_count;
+    } else {
+      resultCard.className = "result-card spoof visible";
+      if (result.decision === "INSUFFICIENT_DATA") {
+        resultTitle.textContent = "\u2717 Liveness Check Failed";
+        resultDetail.textContent = "Insufficient data \u2014 session too short.";
+      } else {
+        resultTitle.textContent = "\u2717 Liveness Check Failed";
+        resultDetail.textContent = failureReason(result.details);
+      }
+      resultSub.textContent =
+        "Blinks: " + result.blink_count + " | Movements: " + result.movement_count;
+    }
+  }
+
+  function failureReason(details) {
+    if (!details) return "Liveness signals did not meet requirements.";
+    const reasons = [];
+    if (!details.blink_passed) reasons.push("not enough blinks");
+    if (!details.movement_passed) reasons.push("not enough head movement");
+    if (!details.duration_passed) reasons.push("session too short");
+    return reasons.length
+      ? "Failed: " + reasons.join(", ") + "."
+      : "Liveness signals did not meet requirements.";
+  }
+
+  function showBackendOffline() {
+    resultCard.className = "result-card spoof visible";
+    resultTitle.textContent = "Backend Offline";
+    resultDetail.textContent =
+      "Could not reach the liveness server at " + FASTAPI_URL;
+    resultSub.textContent =
+      "Detected \u2014 Blinks: " + blinkCount + " | Movements: " + movementCount;
+  }
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  window.resetAll = function resetAll() {
+    blinkCount = 0;
+    movementCount = 0;
+    eyeOpen = true;
+    earBaseline = null;
+    smoothedEAR = null;
+    lastBlinkTime = 0;
+    prevNoseX = null;
+    prevNoseY = null;
+    lastMovementDirection = null;
+
+    blinkNumber.textContent = "0";
+    movementNumber.textContent = "0";
+    blinkNumber.classList.remove("green");
+    movementNumber.classList.remove("green");
+    blinkBox.classList.remove("active");
+    movementBox.classList.remove("active");
+    timerNumber.classList.remove("orange", "green");
+    timerNumber.classList.add("blue");
+    timerNumber.textContent = RECORDING_DURATION;
+    progressFill.style.width = "0%";
+
+    resultCard.className = "result-card";
+
+    startRecordingWindow();
+  };
+
+  // Faster interval (~50 ms) so quick / partial blinks are not missed.
+  function startDetection() {
+    isDetecting = true;
+    if (!detectionInterval) {
+      detectionInterval = setInterval(detectionLoop, 50);
+    }
+  }
+
+  // Begins a fresh verification window (resets the countdown) without ever
+  // stopping the continuous detection loop.
+  function startRecordingWindow() {
+    updateInstruction();
+    startCountdown();
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  async function init() {
+    // 1. Load models.
+    try {
+      instruction.textContent = "Loading models...";
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      modelsLoaded = true;
+    } catch (err) {
+      console.error("Model load error:", err);
+      instruction.textContent = "Failed to load models \u2014 check internet connection";
+      return;
+    }
+
+    // 2. Start webcam.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await new Promise(function (resolve) {
+        video.onloadedmetadata = function () {
+          video.play();
+          resolve();
+        };
+      });
+    } catch (err) {
+      console.error("Camera error:", err);
+      instruction.textContent = "\u26A0 Camera access denied. Please allow camera and reload.";
+      return;
+    }
+
+    // 3. Start the continuous detection loop (camera + landmarks run forever).
+    startDetection();
+    // 4. Begin the first verification window.
+    startRecordingWindow();
+  }
+
+  window.addEventListener("DOMContentLoaded", init);
+})();
+</script>
+</body>
+</html>
