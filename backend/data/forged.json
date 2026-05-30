@@ -1878,5 +1878,119 @@
       },
       "suspicious_region_count": 0
     }
+  },
+  {
+    "id": "cfb616a9-aa35-429f-8b58-339b3c48efbd",
+    "timestamp": "2026-05-30T17:33:40.313921+00:00",
+    "service": "forgery",
+    "forgery_score": 15.670217310499382,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 425,
+    "details": {
+      "ela_score": 7.01,
+      "ela_mean_brightness": 5.96,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 6.3,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 7.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 24,
+        "suspicious_ratio": 0.024
+      },
+      "font_consistency_score": 7.99,
+      "font": {
+        "char_blobs": 3723,
+        "mean_char_height": 11.79,
+        "std_char_height": 6.82,
+        "height_cv": 0.578
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "d81bb27b-3328-42d8-a82d-567d4f43ad17",
+    "timestamp": "2026-05-30T17:34:16.756285+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 131,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "e1faaa6d-3811-4704-b147-979126e0ae63",
+    "timestamp": "2026-05-30T17:36:14.812102+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 138,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
   }
 ]

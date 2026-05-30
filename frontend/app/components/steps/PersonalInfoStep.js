@@ -103,6 +103,21 @@ const NATIONALITY_OPTIONS = [
   "Other",
 ];
 
+const OCCUPATION_OPTIONS = [
+  "Student",
+  "Employed (Private sector)",
+  "Government employee",
+  "Self-employed / Business owner",
+  "Farmer / Agriculture",
+  "Homemaker",
+  "Professional (Doctor, Engineer, Lawyer, etc.)",
+  "Skilled worker / Technician",
+  "Service industry",
+  "Retired",
+  "Unemployed",
+  "Other",
+];
+
 export default function PersonalInfoStep({
   documentType = "Citizenship",
   formData,
@@ -724,13 +739,18 @@ export default function PersonalInfoStep({
               <label className="text-sm font-medium text-[#475569]">
                 Occupation <span className="text-[#E11D48]">*</span>
               </label>
-              <input
-                type="text"
-                placeholder="e.g. Software Engineer, Farmer, Student"
+              <select
                 value={formData.occupation}
                 onChange={onChange("occupation")}
                 className={fieldClass(formErrors.occupation)}
-              />
+              >
+                <option value="">Select occupation</option>
+                {OCCUPATION_OPTIONS.map((occupation) => (
+                  <option key={occupation} value={occupation}>
+                    {occupation}
+                  </option>
+                ))}
+              </select>
               {formErrors.occupation && (
                 <p className="text-xs font-medium text-[#E11D48]">
                   {formErrors.occupation}
