@@ -16,8 +16,8 @@ export default function WhyChoose() {
             <SectionHeading
               align="left"
               eyebrow="Why eKS"
-              title="Built for compliance teams that move fast"
-              subtitle="The accuracy of a forensic lab with the speed users expect from a modern wallet."
+              title="Honest KYC tech, not marketing fluff"
+              subtitle="Every claim on this page maps to code in the repo—document-first onboarding, real risk flags, admin settings."
             />
             <Button href="/onboarding" className="mt-8" size="lg">
               Try the flow

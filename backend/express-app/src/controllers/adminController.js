@@ -1,5 +1,6 @@
 const pool = require("../services/dbClient");
 const settingsService = require("../services/settingsService");
+const onboardingService = require("../services/onboardingService");
 const { mapOnboardingSession } = require("../utils/mapOnboardingSession");
 
 function mapOptionsFromSettings(s) {
@@ -99,71 +100,10 @@ exports.getSubmissionDetails = async (req, res) => {
  * Body: { reviewedBy?: string, notes?: string }
  */
 exports.approveSubmission = async (req, res) => {
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-
     const { id } = req.params;
     const reviewedBy = req.body.reviewedBy || "admin";
-
-    // 1. Fetch the session
-    const { rows } = await client.query(
-      `SELECT * FROM onboarding_sessions WHERE id = $1`,
-      [id]
-    );
-    if (!rows.length) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ success: false, error: "Session not found" });
-    }
-    const s = rows[0];
-
-    // 2. Insert into verified_users
-    await client.query(
-      `INSERT INTO verified_users (
-         session_id, full_name, dob, gender, nationality,
-         email, phone_number, pan_number, occupation,
-         document_type, document_number,
-         approved_at, approved_by
-       ) VALUES (
-         $1, $2, $3, $4, $5,
-         $6, $7, $8, $9,
-         $10, $11,
-         now(), $12
-       )
-       ON CONFLICT DO NOTHING`,
-      [
-        s.id,
-        s.full_name,
-        s.dob,
-        s.gender,
-        s.nationality,
-        s.email,
-        s.phone_number,
-        s.pan_number,
-        s.occupation,
-        s.document_type,
-        s.document_number,
-        reviewedBy,
-      ]
-    );
-
-    // 3. Mark session as approved
-    await client.query(
-      `UPDATE onboarding_sessions SET status = 'approved' WHERE id = $1`,
-      [id]
-    );
-
-    // 4. Mark the face embedding as verified so future KYC attempts are
-    //    checked against this person's face as a known verified identity.
-    if (s.kyc_submission_id) {
-      await client.query(
-        `UPDATE face_embeddings SET is_verified = true WHERE submission_id = $1`,
-        [s.kyc_submission_id]
-      );
-    }
-
-    await client.query("COMMIT");
-
+    await onboardingService.approveSession(id, reviewedBy);
     return res.json({
       success: true,
       message: "Submission approved and user verified",
@@ -171,11 +111,11 @@ exports.approveSubmission = async (req, res) => {
       reviewedBy,
     });
   } catch (error) {
-    await client.query("ROLLBACK");
     console.error("[admin] approveSubmission error:", error.message);
+    if (error.message === "Session not found") {
+      return res.status(404).json({ success: false, error: error.message });
+    }
     return res.status(500).json({ error: error.message });
-  } finally {
-    client.release();
   }
 };
 
@@ -187,31 +127,25 @@ exports.rejectSubmission = async (req, res) => {
   try {
     const { id } = req.params;
     const { reason, reviewedBy } = req.body;
+    const rejectReason =
+      reason ||
+      onboardingService.buildRejectionMessage(
+        (await onboardingService.getSession(id))?.risk_flags || {}
+      );
 
-    const { rowCount } = await pool.query(
-      `UPDATE onboarding_sessions
-       SET    status     = 'rejected',
-              risk_flags = risk_flags || jsonb_build_object(
-                             'rejection_reason', $1::text,
-                             'rejected_by',      $2::text,
-                             'rejected_at',      now()::text
-                           )
-       WHERE  id = $3`,
-      [reason || null, reviewedBy || "admin", id]
-    );
-
-    if (!rowCount) {
-      return res.status(404).json({ success: false, error: "Session not found" });
-    }
+    await onboardingService.rejectSession(id, rejectReason, reviewedBy || "admin");
 
     return res.json({
       success: true,
       message: "Submission rejected",
       submissionId: id,
-      reason,
+      reason: rejectReason,
     });
   } catch (error) {
     console.error("[admin] rejectSubmission error:", error.message);
+    if (error.message === "Session not found") {
+      return res.status(404).json({ success: false, error: error.message });
+    }
     return res.status(500).json({ error: error.message });
   }
 };
@@ -231,17 +165,37 @@ exports.getSettings = async (req, res) => {
 
 exports.updateSettings = async (req, res) => {
   try {
-    const { highRiskThreshold, duplicateFaceThreshold, faceMatchThreshold } =
-      req.body || {};
+    const {
+      lowRiskThreshold,
+      highRiskThreshold,
+      duplicateFaceThreshold,
+      faceMatchThreshold,
+    } = req.body || {};
 
-    if (highRiskThreshold != null) {
-      const n = Number(highRiskThreshold);
-      if (!Number.isFinite(n) || n < 1 || n > 100) {
-        return res.status(400).json({
-          success: false,
-          error: "highRiskThreshold must be between 1 and 100",
-        });
+    for (const [name, val] of [
+      ["lowRiskThreshold", lowRiskThreshold],
+      ["highRiskThreshold", highRiskThreshold],
+    ]) {
+      if (val != null) {
+        const n = Number(val);
+        if (!Number.isFinite(n) || n < 1 || n > 100) {
+          return res.status(400).json({
+            success: false,
+            error: `${name} must be between 1 and 100`,
+          });
+        }
       }
+    }
+
+    const lowN =
+      lowRiskThreshold != null ? Number(lowRiskThreshold) : null;
+    const highN =
+      highRiskThreshold != null ? Number(highRiskThreshold) : null;
+    if (lowN != null && highN != null && lowN >= highN) {
+      return res.status(400).json({
+        success: false,
+        error: "lowRiskThreshold must be less than highRiskThreshold",
+      });
     }
     for (const val of [duplicateFaceThreshold, faceMatchThreshold]) {
       if (val != null) {
@@ -258,11 +212,7 @@ exports.updateSettings = async (req, res) => {
     const updated = await settingsService.updateSettings(req.body);
     return res.json({
       success: true,
-      settings: {
-        highRiskThreshold: updated.high_risk_threshold,
-        duplicateFaceThreshold: updated.duplicate_face_threshold,
-        faceMatchThreshold: updated.face_match_threshold,
-      },
+      settings: await settingsService.getApiSettings(),
     });
   } catch (error) {
     console.error("[admin] updateSettings error:", error.message);

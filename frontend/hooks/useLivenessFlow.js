@@ -16,6 +16,9 @@ import {
 const ML_LIVENESS_URL =
   process.env.NEXT_PUBLIC_ML_URL || "http://localhost:8000/api/v1";
 
+/** ML service rejects sessions shorter than this (seconds). */
+const ML_MIN_DURATION_SEC = 5;
+
 const CHALLENGE_META = {
   loading: { label: "Loading", hint: "Preparing face detection…", emoji: "⏳" },
   forward: { label: "Look forward", hint: "Center your face in the oval", emoji: "🙂" },
@@ -68,9 +71,14 @@ export default function useLivenessFlow({
       setPhaseSafe("verifying");
       setVerifyError("");
 
-      const durationSeconds = startedAtRef.current
+      const rawDuration = startedAtRef.current
         ? (Date.now() - startedAtRef.current) / 1000
         : 10;
+      const clientPassed =
+        stats.blinkCount >= MIN_BLINKS && stats.movementCount >= MIN_MOVEMENTS;
+      const durationSeconds = clientPassed
+        ? Math.max(rawDuration, ML_MIN_DURATION_SEC)
+        : rawDuration;
 
       let liveness = null;
       try {
@@ -89,7 +97,29 @@ export default function useLivenessFlow({
           setLivenessResult(liveness);
         }
       } catch {
-        /* liveness service optional */
+        /* liveness service optional — fall back to client signals below */
+      }
+
+      const liveOk = liveness
+        ? liveness.is_live
+        : clientPassed;
+
+      if (liveness && !liveness.is_live) {
+        setPhaseSafe("failed");
+        verifyingRef.current = false;
+        onError?.(
+          liveness.decision === "INSUFFICIENT_DATA"
+            ? "Liveness recording was too short. Take your time with each step, then try again."
+            : "Liveness check did not pass. Please try again."
+        );
+        return;
+      }
+
+      if (!liveOk) {
+        setPhaseSafe("failed");
+        verifyingRef.current = false;
+        onError?.("Liveness check did not pass. Please try again.");
+        return;
       }
 
       const dataUrlToBlob = (dataUrl, filename) => {
@@ -106,6 +136,7 @@ export default function useLivenessFlow({
       let selfieUrl = null;
       let riskFlags = {};
       let riskScore = null;
+      let decision = null;
 
       if (sessionId && nextCaptures.front) {
         try {
@@ -127,6 +158,17 @@ export default function useLivenessFlow({
             );
           }
 
+          if (liveness) {
+            fd.append("livenessIsLive", liveness.is_live ? "true" : "false");
+            fd.append("livenessDecision", liveness.decision || "");
+            fd.append(
+              "livenessConfidence",
+              String(liveness.confidence_score ?? 0)
+            );
+          } else {
+            fd.append("livenessIsLive", clientPassed ? "true" : "false");
+          }
+
           const apiBase = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
           const res = await fetch(
             `${apiBase}/onboarding/session/${sessionId}/selfie`,
@@ -144,30 +186,27 @@ export default function useLivenessFlow({
             riskScore = data.riskScore ?? null;
             setFaceSimilarity(similarity);
             setFaceIsMatch(isMatch);
+            decision = {
+              outcome: data.outcome || "pending",
+              status: data.status || "submitted",
+              userMessage: data.userMessage || null,
+              userReason: data.userReason || null,
+              riskScore: data.riskScore ?? null,
+            };
           } else {
             setVerifyError(data.error || "Face comparison failed.");
+            setPhaseSafe("failed");
+            verifyingRef.current = false;
+            onError?.(data.error || "Face comparison failed.");
+            return;
           }
         } catch {
           setVerifyError("Could not compare face with your document.");
+          setPhaseSafe("failed");
+          verifyingRef.current = false;
+          onError?.("Could not compare face with your document.");
+          return;
         }
-      }
-
-      const liveOk = liveness
-        ? liveness.is_live
-        : stats.blinkCount >= MIN_BLINKS && stats.movementCount >= MIN_MOVEMENTS;
-
-      if (liveness && !liveness.is_live) {
-        setPhaseSafe("failed");
-        verifyingRef.current = false;
-        onError?.("Liveness check did not pass. Please try again.");
-        return;
-      }
-
-      if (!liveOk) {
-        setPhaseSafe("failed");
-        verifyingRef.current = false;
-        onError?.("Liveness check did not pass. Please try again.");
-        return;
       }
 
       setPhaseSafe("complete");
@@ -179,6 +218,7 @@ export default function useLivenessFlow({
         selfieUrl,
         riskFlags,
         riskScore,
+        decision,
         blinkCount: stats.blinkCount,
         movementCount: stats.movementCount,
       });

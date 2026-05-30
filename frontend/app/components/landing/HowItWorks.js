@@ -11,8 +11,8 @@ export default function HowItWorks() {
       <div className="mx-auto max-w-6xl px-5 sm:px-6">
         <SectionHeading
           eyebrow="How it works"
-          title="From capture to decision in seconds"
-          subtitle="A frictionless flow for users, a forensic pipeline behind the scenes."
+          title="Same 3 steps as /onboarding"
+          subtitle="Upload → review OCR-filled info → face verification. Admins finish the rest in the dashboard."
         />
 
         <div className="relative mt-16">

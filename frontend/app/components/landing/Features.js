@@ -10,9 +10,9 @@ export default function Features() {
     <section id="features" className="relative py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-6">
         <SectionHeading
-          eyebrow="Detection Stack"
-          title="Five layers of fraud defense, one decision"
-          subtitle="Every onboarding runs through a coordinated set of AI engines designed to catch what a single check would miss."
+          eyebrow="What eKS actually runs"
+          title="Six checks wired into your onboarding"
+          subtitle="Same pipeline as the live flow: document upload, personal review, face verification, and admin risk dashboard."
         />
 
         <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">

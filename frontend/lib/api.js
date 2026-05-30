@@ -2,7 +2,8 @@
  * API service for KYC backend communication
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
 export class APIError extends Error {
   constructor(message, status, data) {

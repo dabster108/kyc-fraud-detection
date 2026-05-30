@@ -60,7 +60,11 @@ export default function Stats() {
                 className="text-center sm:text-left"
               >
                 <p className="font-display text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
-                  <StatValue stat={stat} />
+                  {stat.static ? (
+                    stat.display
+                  ) : (
+                    <StatValue stat={stat} />
+                  )}
                 </p>
                 <p className="mt-2 text-sm font-medium text-white/50">
                   {stat.label}

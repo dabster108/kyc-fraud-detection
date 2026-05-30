@@ -1,64 +1,67 @@
+/** Landing page content — aligned with the real eKS onboarding + admin stack. */
+
 export const STATS = [
   {
-    label: "KYCs verified",
-    value: 2.4,
-    display: "2.4M+",
+    label: "Nepali ID types supported",
+    value: 3,
+    display: "3",
     suffix: "",
   },
   {
-    label: "Fraud attempts blocked",
-    value: 184,
-    display: "184K+",
+    label: "Step verification flow",
+    value: 3,
+    display: "3",
     suffix: "",
   },
   {
-    label: "Average decision time",
-    value: 2.8,
-    display: "2.8s",
-    suffix: "s",
+    label: "Risk signals in admin review",
+    value: 15,
+    display: "15+",
+    suffix: "",
+    static: true,
   },
   {
-    label: "Identity match accuracy",
-    value: 99.3,
-    display: "99.3%",
-    suffix: "%",
+    label: "Point risk scale (0–100)",
+    value: 100,
+    display: "100",
+    suffix: "",
   },
 ];
 
 export const FEATURES = [
   {
     title: "Document forgery detection",
-    desc: "Detects tampered regions, font mismatches, and missing security layers in seconds.",
+    desc: "ELA, EXIF, edge, font, and copy-move checks on uploaded citizenship, NID, or license images.",
     icon: "shield-check",
     accent: "from-brand-500 to-brand-700",
   },
   {
-    title: "Face similarity scoring",
-    desc: "Compares liveness frames with document portraits using deep vision models.",
-    icon: "scan-face",
+    title: "OCR pre-fill & extraction",
+    desc: "Mistral vision reads your ID, maps fields (including BS/AD dates), and pre-fills the review form.",
+    icon: "file-search",
     accent: "from-emerald-400 to-brand-500",
   },
   {
-    title: "Device risk intelligence",
-    desc: "Flags risky devices, emulators, and suspicious session fingerprints.",
-    icon: "fingerprint",
+    title: "Guided liveness & face match",
+    desc: "Blink and head-turn challenges, then compare your live selfie to the portrait on your document.",
+    icon: "scan-face",
     accent: "from-brand-400 to-emerald-500",
   },
   {
-    title: "Behavioral anomaly watch",
-    desc: "Monitors velocity, geo-shifts, and replays to stop synthetic abuse.",
-    icon: "activity",
+    title: "Duplicate & device checks",
+    desc: "Blocks verified citizenship reuse, counts repeat phones/docs, and flags shared device fingerprints.",
+    icon: "fingerprint",
     accent: "from-brand-500 to-lime-500",
   },
   {
-    title: "Duplicate identity engine",
-    desc: "Finds repeat attempts across submissions with fuzzy matching.",
+    title: "OCR vs form tamper check",
+    desc: "Compares what you type in step 2 against what was read from the document to catch edited fields.",
     icon: "sparkles",
     accent: "from-brand-600 to-green-600",
   },
   {
-    title: "Human review workflow",
-    desc: "Escalate cases with full audit trails and clear resolution paths.",
+    title: "Risk score & admin review",
+    desc: "Cumulative 0–100 risk score with explainable flags, auto-approve/reject thresholds, and an analyst dashboard.",
     icon: "check-circle",
     accent: "from-emerald-500 to-brand-600",
   },
@@ -67,67 +70,67 @@ export const FEATURES = [
 export const HOW_IT_WORKS = [
   {
     step: "01",
-    title: "Capture and submit",
-    desc: "Users upload documents and complete face verification in one flow.",
-    icon: "scan-face",
+    title: "Upload your document",
+    desc: "Citizenship (front + back), National ID, or driving license. Forgery scan and OCR run immediately.",
+    icon: "file-search",
   },
   {
     step: "02",
-    title: "Run AI checks",
-    desc: "Engines analyze authenticity, duplicate signals, and behavioral risk.",
-    icon: "activity",
-  },
-  {
-    step: "03",
-    title: "Score and decide",
-    desc: "Risk is calculated instantly with explainable score breakdowns.",
+    title: "Review your details",
+    desc: "Confirm OCR-filled name, addresses, and dates. Duplicate and tamper checks add to your risk score.",
     icon: "shield-check",
   },
   {
+    step: "03",
+    title: "Face verification",
+    desc: "Complete liveness (blink, turn left/right), match selfie to ID photo, and get approve / pending / reject.",
+    icon: "scan-face",
+  },
+  {
     step: "04",
-    title: "Review and resolve",
-    desc: "Analysts approve, flag, or reject with full evidence logs.",
+    title: "Admin decision",
+    desc: "Low-risk cases can auto-approve; others land in the dashboard with full flags, selfies, and OCR evidence.",
     icon: "check-circle",
   },
 ];
 
 export const WHY_CHOOSE = [
   {
-    title: "Regulator-ready audit trails",
-    desc: "Every decision is logged with the evidence required for compliance.",
+    title: "Built for Nepal IDs",
+    desc: "Citizenship front/back OCR, BS issued dates, AD date of birth, and district-aware address fields.",
     icon: "file-search",
   },
   {
-    title: "Decision speed under 10s",
-    desc: "Automated scoring and queues keep onboarding lightning fast.",
-    icon: "sparkles",
-  },
-  {
-    title: "Custom risk policies",
-    desc: "Tune thresholds by market, segment, or partner channel.",
+    title: "Explainable risk flags",
+    desc: "Every score bump ties to a labeled signal—forgery, face match, duplicates, edited fields—not a black box.",
     icon: "shield-check",
   },
   {
-    title: "24/7 anomaly coverage",
-    desc: "Always-on monitoring across every identity signal.",
-    icon: "activity",
+    title: "Tunable thresholds",
+    desc: "Admins set low/high risk bands, face-match similarity, and duplicate-face cosine limits in Settings.",
+    icon: "sparkles",
+  },
+  {
+    title: "One continuous flow",
+    desc: "Document → review → liveness in a single session stored in Postgres with images on Cloudinary.",
+    icon: "check-circle",
   },
 ];
 
 export const ENGINES = [
   {
-    title: "Forgery Scan",
-    desc: "Deep pixel inspection and MRZ validation for passports and IDs.",
-    icon: "fingerprint",
+    title: "Forgery analyzer",
+    desc: "FastAPI pipeline scores tampering from pixel, metadata, and layout signals on each upload.",
+    icon: "shield-check",
   },
   {
-    title: "Liveness Graph",
-    desc: "Blink, motion, and depth checks to stop spoofing attacks.",
+    title: "OCR & face pipeline",
+    desc: "Extracts structured fields, crops the ID portrait, and embeds the face for later selfie comparison.",
     icon: "scan-face",
   },
   {
-    title: "Network Trust",
-    desc: "IP intelligence and device clustering to detect mule farms.",
+    title: "Risk & decision engine",
+    desc: "Merges forgery, face, duplicate, device, and edit signals—then auto-approves, rejects, or queues review.",
     icon: "activity",
   },
 ];

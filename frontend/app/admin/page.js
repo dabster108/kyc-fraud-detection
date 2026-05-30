@@ -8,10 +8,12 @@ import {
   updateSettings,
 } from "../../lib/adminApi";
 import AdminSidebar from "./AdminSidebar";
+import AdminShell from "./AdminShell";
 
 const AUTH_KEY = "adminAuthed";
 
 const DEFAULT_SETTINGS = {
+  lowRiskThreshold: 40,
   highRiskThreshold: 70,
   duplicateFaceThreshold: 0.6,
   faceMatchThreshold: 0.65,
@@ -24,15 +26,15 @@ const STATUS_COLORS = {
   Rejected: "bg-red-100 text-red-700",
 };
 
-const riskColor = (score, highRisk = 70) => {
+const riskColor = (score, lowRisk = 40, highRisk = 70) => {
   if (score >= highRisk) return "text-red-600 font-bold";
-  if (score >= 40) return "text-amber-600 font-semibold";
+  if (score > lowRisk) return "text-amber-600 font-semibold";
   return "text-emerald-600 font-semibold";
 };
 
-const riskBarColor = (score, highRisk = 70) => {
+const riskBarColor = (score, lowRisk = 40, highRisk = 70) => {
   if (score >= highRisk) return "bg-red-500";
-  if (score >= 40) return "bg-amber-400";
+  if (score > lowRisk) return "bg-amber-400";
   return "bg-emerald-500";
 };
 
@@ -53,6 +55,7 @@ export default function AdminPanelPage() {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
+  const lowRiskThreshold = appSettings.lowRiskThreshold ?? 40;
   const highRiskThreshold = appSettings.highRiskThreshold ?? 70;
 
   const loadSettings = async () => {
@@ -151,8 +154,16 @@ export default function AdminPanelPage() {
     setIsSavingSettings(true);
     setSettingsMsg("");
     try {
+      const low = Number(settingsDraft.lowRiskThreshold);
+      const high = Number(settingsDraft.highRiskThreshold);
+      if (low >= high) {
+        setSettingsMsg("Low risk threshold must be less than high risk threshold.");
+        setIsSavingSettings(false);
+        return;
+      }
       const saved = await updateSettings({
-        highRiskThreshold: Number(settingsDraft.highRiskThreshold),
+        lowRiskThreshold: low,
+        highRiskThreshold: high,
         duplicateFaceThreshold: Number(settingsDraft.duplicateFaceThreshold),
         faceMatchThreshold: Number(settingsDraft.faceMatchThreshold),
       });
@@ -188,20 +199,18 @@ export default function AdminPanelPage() {
 
   if (!isAuthed) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0F172A] to-[#1E293B] px-4">
-        <div className="w-full max-w-md rounded-2xl bg-white p-10 shadow-2xl">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand)] text-white text-lg font-bold">e</div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-[#94A3B8]">eKS Platform</p>
-              <p className="font-display text-xl font-bold text-[#0B1324]">Admin Portal</p>
-            </div>
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f5f7] px-4">
+        <div className="w-full max-w-md rounded-lg border border-[#e2e8f0] bg-white p-8 shadow-sm">
+          <div className="mb-6">
+            <p className="text-sm font-semibold text-[#0f172a]">eKS Admin</p>
+            <p className="mt-1 text-sm text-[#64748b]">Sign in to review submissions.</p>
           </div>
-          <h1 className="text-2xl font-bold text-[#0B1324]">Sign in</h1>
-          <p className="mt-1 text-sm text-[#64748B]">Access the KYC review dashboard.</p>
+          <h1 className="font-display text-2xl font-semibold text-[#0f172a]">
+            Sign in
+          </h1>
           <form className="mt-6 flex flex-col gap-4" onSubmit={handleLogin}>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Username</label>
+              <label className="text-xs font-medium text-[#64748b]">Username</label>
               <input
                 type="text"
                 value={credentials.username}
@@ -211,7 +220,7 @@ export default function AdminPanelPage() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Password</label>
+              <label className="text-xs font-medium text-[#64748b]">Password</label>
               <input
                 type="password"
                 value={credentials.password}
@@ -235,39 +244,42 @@ export default function AdminPanelPage() {
     );
   }
 
+  const tabTitles = {
+    overview: "Overview",
+    submissions: "Submissions",
+    flagged: "High risk queue",
+    analytics: "Analytics",
+    settings: "Settings",
+  };
+
   return (
-    <div className="flex min-h-screen bg-[#F1F5F9]">
-      <AdminSidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        stats={{ total: stats.total, flaggedCount: flaggedSubmissions.length }}
-        onLogout={handleLogout}
-      />
-
-      {/* Main content */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Top bar */}
-        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[#E2E8F0] bg-white px-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">
-              {{ overview: "Overview", submissions: "All Submissions", flagged: "Flagged & High Risk", analytics: "Analytics", settings: "Settings" }[activeTab]}
-            </p>
-            <p className="font-semibold text-[#0B1324]">KYC Review Dashboard</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-              ● Live
-            </span>
-            <button
-              onClick={() => loadSubmissions()}
-              className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-xs font-semibold text-[#64748B] transition hover:border-[#CBD5E1] hover:text-[#0F172A]"
-            >
-              ↻ Refresh
-            </button>
-          </div>
+    <AdminShell
+      sidebar={({ collapsed, onCollapsedChange }) => (
+        <AdminSidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          stats={{ total: stats.total, flaggedCount: flaggedSubmissions.length }}
+          onLogout={handleLogout}
+          collapsed={collapsed}
+          onCollapsedChange={onCollapsedChange}
+        />
+      )}
+      header={
+        <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-[#e2e8f0] bg-white px-6">
+          <h1 className="text-base font-semibold text-[#0f172a]">
+            {tabTitles[activeTab] || "Admin"}
+          </h1>
+          <button
+            type="button"
+            onClick={() => loadSubmissions()}
+            className="rounded-md border border-[#e2e8f0] bg-white px-3 py-1.5 text-sm text-[#475569] hover:bg-[#f4f5f7]"
+          >
+            Refresh
+          </button>
         </header>
-
-        <main className="flex-1 overflow-y-auto p-6">
+      }
+    >
+      <div className="p-6">
           {loadError ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {loadError}
@@ -283,7 +295,9 @@ export default function AdminPanelPage() {
           {activeTab === "overview" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Overview</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Overview
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Real-time KYC submission metrics and risk summary.</p>
               </div>
 
@@ -378,7 +392,7 @@ export default function AdminPanelPage() {
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_COLORS[s.status] || "bg-gray-100 text-gray-600"}`}>
                         {s.status}
                       </span>
-                      <span className={`text-sm ${riskColor(s.riskScore, highRiskThreshold)}`}>{s.riskScore}%</span>
+                      <span className={`text-sm ${riskColor(s.riskScore, lowRiskThreshold, highRiskThreshold)}`}>{s.riskScore}%</span>
                     </div>
                   ))}
                 </div>
@@ -391,7 +405,7 @@ export default function AdminPanelPage() {
             <div className="space-y-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-[#0B1324]">
+                  <h2 className="font-display text-3xl font-bold text-[#0B1324]">
                     {activeTab === "flagged" ? "Flagged & High Risk" : "All Submissions"}
                   </h2>
                   <p className="mt-1 text-sm text-[#64748B]">
@@ -425,7 +439,7 @@ export default function AdminPanelPage() {
                     onChange={(e) => setDocFilter(e.target.value)}
                     className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm text-[#0F172A] focus:border-[var(--brand)] focus:outline-none"
                   >
-                    {["All", "Passport", "Citizenship", "Driving License"].map((d) => (
+                    {["All", "Citizenship", "National ID", "Driving license"].map((d) => (
                       <option key={d}>{d}</option>
                     ))}
                   </select>
@@ -486,11 +500,11 @@ export default function AdminPanelPage() {
                             <div className="flex items-center gap-2">
                               <div className="h-1.5 w-16 rounded-full bg-[#F1F5F9]">
                                 <div
-                                  className={`h-1.5 rounded-full ${riskBarColor(item.riskScore, highRiskThreshold)}`}
+                                  className={`h-1.5 rounded-full ${riskBarColor(item.riskScore, lowRiskThreshold, highRiskThreshold)}`}
                                   style={{ width: `${item.riskScore}%` }}
                                 />
                               </div>
-                              <span className={`text-sm ${riskColor(item.riskScore, highRiskThreshold)}`}>{item.riskScore}%</span>
+                              <span className={`text-sm ${riskColor(item.riskScore, lowRiskThreshold, highRiskThreshold)}`}>{item.riskScore}%</span>
                             </div>
                           </td>
                           <td className="px-5 py-4 text-xs text-[#64748B]">{item.submittedAt}</td>
@@ -527,7 +541,9 @@ export default function AdminPanelPage() {
           {activeTab === "analytics" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Analytics</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Analytics
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Patterns and distributions across all KYC submissions.</p>
               </div>
 
@@ -589,7 +605,7 @@ export default function AdminPanelPage() {
                       ), 1);
                       const pct = (cnt / maxCnt) * 100;
                       const barColor =
-                        hi <= 40
+                        hi <= lowRiskThreshold
                           ? "bg-emerald-400"
                           : hi <= highRiskThreshold
                             ? "bg-amber-400"
@@ -609,9 +625,9 @@ export default function AdminPanelPage() {
                     })}
                   </div>
                   <div className="mt-3 flex gap-4 text-xs">
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-emerald-400" /> Low (0–40)</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate (40–{highRiskThreshold})</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High ({highRiskThreshold}–100)</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-emerald-400" /> Low (0–{lowRiskThreshold})</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate ({lowRiskThreshold + 1}–{highRiskThreshold})</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High ({highRiskThreshold + 1}–100)</span>
                   </div>
                 </div>
               </div>
@@ -622,7 +638,9 @@ export default function AdminPanelPage() {
           {activeTab === "settings" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Settings</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Settings
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Admin panel configuration.</p>
               </div>
               <div className="rounded-2xl bg-white p-8 shadow-sm">
@@ -636,6 +654,14 @@ export default function AdminPanelPage() {
                   </div>
 
                   {[
+                    {
+                      key: "lowRiskThreshold",
+                      label: "Risk Threshold — Low",
+                      sub: "Scores at or below this are low risk (green). Also used as the auto-approve ceiling after selfie verification.",
+                      step: "1",
+                      min: 1,
+                      max: 100,
+                    },
                     {
                       key: "highRiskThreshold",
                       label: "Risk Threshold — High",
@@ -709,8 +735,7 @@ export default function AdminPanelPage() {
               </div>
             </div>
           )}
-        </main>
       </div>
-    </div>
+    </AdminShell>
   );
 }

@@ -9,6 +9,7 @@ import TopNav from "../components/TopNav";
 import FaceVerificationStep from "../components/steps/FaceVerificationStep";
 import PersonalInfoStep from "../components/steps/PersonalInfoStep";
 import UploadDocumentStep from "../components/steps/UploadDocumentStep";
+import { API_BASE_URL } from "../../lib/api";
 
 // Document-first flow: upload the ID first so OCR can pre-fill the review form.
 const steps = [
@@ -17,7 +18,7 @@ const steps = [
   { id: 3, label: "Face Verification" },
 ];
 
-const documentTypes = ["Passport", "Citizenship", "Driving License"];
+const documentTypes = ["Citizenship", "National ID", "Driving license"];
 
 const EMPTY_FORM = {
   nationality: "",
@@ -52,7 +53,7 @@ const EMPTY_FORM = {
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
-  const [documentType, setDocumentType] = useState("Passport");
+  const [documentType, setDocumentType] = useState("Citizenship");
   const [isDragging, setIsDragging] = useState(false);
   const [docFile, setDocFile] = useState(null);
   const [docPreviewUrl, setDocPreviewUrl] = useState("");
@@ -91,6 +92,9 @@ export default function OnboardingPage() {
   const pageLoadTimeRef = useRef(Date.now());
   const [isStepLoading, setIsStepLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submissionOutcome, setSubmissionOutcome] = useState(null);
+  const [submissionMessage, setSubmissionMessage] = useState("");
+  const [submissionReason, setSubmissionReason] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isClient, setIsClient] = useState(false);
   const fileInputRef = useRef(null);
@@ -240,7 +244,9 @@ export default function OnboardingPage() {
       errors.documentNumber =
         documentType === "Citizenship"
           ? "Citizenship number is required."
-          : "Document number is required.";
+          : documentType === "National ID"
+            ? "National ID number is required."
+            : "License number is required.";
     }
 
     if (!formData.documentIssuedDate.trim()) {
@@ -363,6 +369,7 @@ export default function OnboardingPage() {
     backendSelfieUrl = null,
     backendFaceIsMatch = null,
     backendFaceSimilarity = null,
+    decision = null,
   }) => {
     setSubmitError("");
     setIsStepLoading(true);
@@ -376,6 +383,23 @@ export default function OnboardingPage() {
       }
       if (backendFaceSimilarity != null) {
         setFaceSimilarityScore(backendFaceSimilarity);
+      }
+      if (decision) {
+        setSubmissionOutcome(decision.outcome || "pending");
+        setSubmissionMessage(decision.userMessage || "");
+        setSubmissionReason(decision.userReason || "");
+        if (decision.riskScore != null) {
+          setRiskFlags((current) => ({
+            ...current,
+            final_risk_score: decision.riskScore,
+          }));
+        }
+      } else {
+        setSubmissionOutcome("pending");
+        setSubmissionMessage(
+          "Your application was submitted successfully. Our team will review it shortly."
+        );
+        setSubmissionReason("");
       }
 
       if (streamRef.current) {
@@ -413,6 +437,7 @@ export default function OnboardingPage() {
       backendSelfieUrl: result.selfieUrl,
       backendFaceIsMatch: result.faceIsMatch,
       backendFaceSimilarity: result.faceSimilarity,
+      decision: result.decision,
     });
   };
 
@@ -437,14 +462,19 @@ export default function OnboardingPage() {
           fd.append("frontImage", docFile);
         }
 
-        const res = await fetch("/api/v1/onboarding/session/document", {
+        const res = await fetch(`${API_BASE_URL}/onboarding/session/document`, {
           method: "POST",
           body: fd,
         });
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          setSubmitError(data.error || "Could not process document. Please try again.");
+          setSubmitError(
+            data.code === "VERIFIED_USER_EXISTS"
+              ? data.error ||
+                  "Records found in our userbase for this citizenship number. You cannot continue."
+              : data.error || "Could not process document. Please try again."
+          );
           setIsStepLoading(false);
           return;
         }
@@ -506,7 +536,7 @@ export default function OnboardingPage() {
       try {
         const submissionSpeedMs = Date.now() - pageLoadTimeRef.current;
         const sid = sessionId || "unknown";
-        const res = await fetch(`/api/v1/onboarding/session/${sid}/personal-info`, {
+        const res = await fetch(`${API_BASE_URL}/onboarding/session/${sid}/personal-info`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -519,7 +549,12 @@ export default function OnboardingPage() {
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          setSubmitError(data.error || "Could not save your info. Please try again.");
+          setSubmitError(
+            data.code === "VERIFIED_USER_EXISTS"
+              ? data.error ||
+                  "Records found in our userbase for this citizenship number. You cannot continue."
+              : data.error || "Could not save your info. Please try again."
+          );
           setIsStepLoading(false);
           return;
         }
@@ -789,6 +824,9 @@ export default function OnboardingPage() {
 
   const resetFlow = () => {
     setIsSubmitted(false);
+    setSubmissionOutcome(null);
+    setSubmissionMessage("");
+    setSubmissionReason("");
     setStep(1);
     setFormData({ ...EMPTY_FORM });
     setFormErrors({});
@@ -832,31 +870,67 @@ export default function OnboardingPage() {
     <div className="min-h-screen bg-[var(--canvas)] text-[var(--ink)]">
       <TopNav />
 
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center px-6 py-12">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center px-6 pb-12 pt-24 sm:pt-28">
         {isSubmitted ? (
           <section className="w-full max-w-3xl rounded-2xl bg-white p-12 text-center shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
-              <CheckIcon className="h-7 w-7" />
-            </div>
-            <h1 className="mt-6 font-display text-3xl text-[#0B1324]">
-              KYC submitted successfully
-            </h1>
-            <p className="mt-3 text-sm text-[#64748B]">
-              Please wait for a human to review it.
-            </p>
+            {submissionOutcome === "approved" ? (
+              <>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
+                  <CheckIcon className="h-7 w-7" />
+                </div>
+                <h1 className="mt-6 font-display text-3xl text-[#0B1324]">
+                  You&apos;re approved
+                </h1>
+                <p className="mt-3 text-sm text-[#64748B]">
+                  {submissionMessage ||
+                    "Your identity has been verified. Your application is approved."}
+                </p>
+              </>
+            ) : submissionOutcome === "rejected" ? (
+              <>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100 text-red-600">
+                  <span className="text-2xl font-bold">✕</span>
+                </div>
+                <h1 className="mt-6 font-display text-3xl text-[#0B1324]">
+                  Application not approved
+                </h1>
+                <p className="mt-3 text-sm text-[#64748B]">
+                  {submissionMessage || "We could not approve your application."}
+                </p>
+                {submissionReason ? (
+                  <p className="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    {submissionReason}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <CheckIcon className="h-7 w-7" />
+                </div>
+                <h1 className="mt-6 font-display text-3xl text-[#0B1324]">
+                  Application submitted
+                </h1>
+                <p className="mt-3 text-sm text-[#64748B]">
+                  {submissionMessage ||
+                    "Your application was submitted successfully. Our team will review it shortly."}
+                </p>
+              </>
+            )}
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-              <Link
-                href="/admin"
+              <button
+                type="button"
+                onClick={resetFlow}
                 className="rounded-full bg-[var(--brand)] px-6 py-3 text-sm font-semibold text-white"
               >
-                Go to Admin Panel
-              </Link>
-              <button
-                onClick={resetFlow}
+                {submissionOutcome === "rejected" ? "Try again" : "Submit another KYC"}
+              </button>
+              <Link
+                href="/"
                 className="rounded-full border border-[#E2E8F0] px-6 py-3 text-sm font-semibold text-[#64748B]"
               >
-                Submit another KYC
-              </button>
+                Back to home
+              </Link>
             </div>
           </section>
         ) : (

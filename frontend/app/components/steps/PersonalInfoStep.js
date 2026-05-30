@@ -104,7 +104,7 @@ const NATIONALITY_OPTIONS = [
 ];
 
 export default function PersonalInfoStep({
-  documentType = "Passport",
+  documentType = "Citizenship",
   formData,
   formErrors,
   onChange,
@@ -118,7 +118,11 @@ export default function PersonalInfoStep({
     }`;
 
   const documentNumberLabel =
-    documentType === "Citizenship" ? "Citizenship Number" : "Document Number";
+    documentType === "Citizenship"
+      ? "Citizenship Number"
+      : documentType === "National ID"
+        ? "National ID Number"
+        : "License Number";
 
   const currentDistricts =
     DISTRICTS_BY_PROVINCE[formData.currentProvince] || [];
@@ -165,7 +169,9 @@ export default function PersonalInfoStep({
                 placeholder={
                   documentType === "Citizenship"
                     ? "e.g. 75-01-79-06164"
-                    : "Enter document number"
+                    : documentType === "National ID"
+                      ? "e.g. 123-456-78901"
+                      : "Enter license number"
                 }
               />
               {formErrors.documentNumber && (
@@ -178,13 +184,20 @@ export default function PersonalInfoStep({
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
                 Issued Date <span className="text-[#E11D48]">*</span>
+                <span className="ml-1 font-normal text-[#94A3B8]">
+                  (BS · yyyy/mm/dd)
+                </span>
               </label>
               <input
-                type="date"
+                type="text"
+                placeholder="e.g. 2080/05/15"
                 value={formData.documentIssuedDate}
                 onChange={onChange("documentIssuedDate")}
                 className={fieldClass(formErrors.documentIssuedDate)}
               />
+              <p className="text-xs text-[#94A3B8]">
+                Bikram Sambat — same format as on your citizenship (back)
+              </p>
               {formErrors.documentIssuedDate && (
                 <p className="text-xs font-medium text-[#E11D48]">
                   {formErrors.documentIssuedDate}
@@ -269,14 +282,21 @@ export default function PersonalInfoStep({
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
                 Date of Birth <span className="text-[#E11D48]">*</span>
+                <span className="ml-1 font-normal text-[#94A3B8]">
+                  (AD · yyyy/mm/dd)
+                </span>
               </label>
               <input
                 ref={dobInputRef}
-                type="date"
+                type="text"
+                placeholder="e.g. 1998/03/21"
                 value={formData.dob}
                 onChange={onChange("dob")}
                 className={fieldClass(formErrors.dob)}
               />
+              <p className="text-xs text-[#94A3B8]">
+                Gregorian (AD) — English side of your citizenship (front)
+              </p>
               {formErrors.dob && (
                 <p className="text-xs font-medium text-[#E11D48]">
                   {formErrors.dob}
@@ -732,7 +752,7 @@ export default function PersonalInfoStep({
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-[#475569]">
                 <PhoneIcon className="h-4 w-4 text-[#94A3B8]" />
-                Phone Number
+                Phone Number<span className="text-[#E11D48]">*</span>
               </label>
               <input
                 type="tel"

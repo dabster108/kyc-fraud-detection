@@ -152,7 +152,7 @@ export default function UploadDocumentStep({
           Upload Identity Document
         </h1>
         <p className="text-sm text-[#64748B]">
-          Upload a clear photo of your passport, citizenship, or driving license
+          Upload a clear photo of your citizenship, national ID, or driving license
         </p>
       </div>
 
