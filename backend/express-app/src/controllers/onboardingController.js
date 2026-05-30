@@ -112,6 +112,7 @@ const processDocument = async (req, res) => {
       forgeryScore: result.forgeryScore,
       forgeryDetails: result.forgeryDetails,
       documentUrl: result.documentUrl,
+      documentBackUrl: result.documentBackUrl,
       documentFaceUrl: result.documentFaceUrl,
       riskFlags: result.riskFlags,
       riskScore: result.riskScore,
@@ -121,6 +122,122 @@ const processDocument = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to process document",
+    });
+  }
+};
+
+/**
+ * POST /api/v1/onboarding/session/document
+ * Multipart: frontImage (required), backImage (optional)
+ * Body fields: documentType, documentNumber, documentIssuedDate,
+ *              documentIssuedPlace, deviceFingerprint
+ *
+ * Document-first flow — this is now Step 1:
+ *  1. Create an empty onboarding_session shell
+ *  2. Run the full document pipeline (upload + OCR + forgery + face extract)
+ *  3. Return sessionId + ocrData + prefill (mapped fields for the Review step)
+ */
+const startWithDocument = async (req, res) => {
+  try {
+    const frontFile = req.files?.frontImage?.[0] || req.files?.image?.[0];
+    if (!frontFile) {
+      return res.status(400).json({ success: false, error: "Front image is required" });
+    }
+    const backFile = req.files?.backImage?.[0] || null;
+
+    const ipAddress =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      req.ip ||
+      null;
+
+    const sessionId = await onboardingService.createSessionShell({
+      deviceFingerprint: req.body.deviceFingerprint || null,
+      ipAddress,
+      userAgent: req.headers["user-agent"] || null,
+    });
+
+    const result = await onboardingService.processDocument(sessionId, {
+      frontBuffer: frontFile.buffer,
+      backBuffer: backFile?.buffer || null,
+      documentType: req.body.documentType || null,
+      documentNumber: req.body.documentNumber || null,
+      documentIssuedDate: req.body.documentIssuedDate || null,
+      documentIssuedPlace: req.body.documentIssuedPlace || null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      sessionId,
+      ocrData: result.ocrData,
+      prefill: result.prefill,
+      forgeryDecision: result.forgeryDecision,
+      forgeryScore: result.forgeryScore,
+      forgeryDetails: result.forgeryDetails,
+      documentUrl: result.documentUrl,
+      documentBackUrl: result.documentBackUrl,
+      documentFaceUrl: result.documentFaceUrl,
+      riskFlags: result.riskFlags,
+      riskScore: result.riskScore,
+    });
+  } catch (err) {
+    console.error("[onboarding] startWithDocument error:", err.message);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to process document",
+    });
+  }
+};
+
+/**
+ * PUT /api/v1/onboarding/session/:sessionId/personal-info
+ * Body (JSON): the OCR-prefilled, user-edited personal-info form
+ *
+ * Document-first flow — this is now Step 2:
+ *  1. Persist the personal info onto the existing session
+ *  2. Run identity/behaviour duplicate checks
+ *  3. Run the OCR-vs-edit tamper check (fuzzy compare) and raise risk on
+ *     drastic divergence from what the document actually says
+ */
+const submitPersonalInfo = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, error: "Missing sessionId" });
+    }
+
+    const required = ["fullName", "nationality", "dob", "gender", "occupation"];
+    const missing = required.filter((f) => !req.body[f]?.toString().trim());
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        fields: missing,
+      });
+    }
+
+    const ipAddress =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      req.ip ||
+      null;
+
+    const result = await onboardingService.submitPersonalInfo(sessionId, req.body, {
+      ipAddress,
+      userAgent: req.headers["user-agent"] || null,
+    });
+
+    return res.json({
+      success: true,
+      riskFlags: result.riskFlags,
+      riskScore: result.riskScore,
+      editComparison: result.editComparison,
+    });
+  } catch (err) {
+    console.error("[onboarding] submitPersonalInfo error:", err.message);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to save personal info",
     });
   }
 };
@@ -169,9 +286,16 @@ const processSelfie = async (req, res) => {
     console.error("[onboarding] processSelfie error:", err.message);
     return res.status(500).json({
       success: false,
-      error: "Failed to process selfie",
+      error: err.message || "Failed to process selfie",
     });
   }
 };
 
-module.exports = { createSession, getSession, processDocument, processSelfie };
+module.exports = {
+  createSession,
+  getSession,
+  processDocument,
+  processSelfie,
+  startWithDocument,
+  submitPersonalInfo,
+};

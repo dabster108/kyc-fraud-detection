@@ -28,42 +28,95 @@ from app.models.ocr_models import OCRResult
 
 logger = logging.getLogger(__name__)
 
-# Exact system prompt that instructs the model to emit a single JSON object.
+# ---------------------------------------------------------------------------
+# System prompt shared by both single-image and dual-image calls.
+# The dual-image call appends an extra user-message line identifying which
+# image is the front and which is the back.
+# ---------------------------------------------------------------------------
 SYSTEM_PROMPT = """
 You are a KYC document parser for Nepali government ID documents.
-Analyze the image and return ONLY a valid JSON object with absolutely no extra text,
-no markdown, no code blocks, no explanation.
+Analyze the image(s) and return ONLY a valid JSON object — no extra text,
+no markdown fences, no explanation.
 
-DEVANAGARI DIGIT REFERENCE (read every number using this table exactly):
-  ० = 0    १ = 1    २ = 2    ३ = 3    ४ = 4
-  ५ = 5    ६ = 6    ७ = 7    ८ = 8    ९ = 9
-Do NOT confuse २ (2) with ९ (9) or ३ (3); look at each glyph carefully.
-ALL numeric output (citizenship_number, nin, dates, ward_number) MUST use
-Western Arabic digits (0-9), never Devanagari digits.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DEVANAGARI DIGIT TABLE (apply to every digit you read):
+  ० = 0  १ = 1  २ = 2  ३ = 3  ४ = 4
+  ५ = 5  ६ = 6  ७ = 7  ८ = 8  ९ = 9
+Do NOT confuse २ (2) with ९ (9) or ३ (3). Examine every glyph carefully.
+ALL numeric output MUST use Western Arabic digits (0-9).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-If document is Nepali Citizenship Card (नागरिकता पत्र) return:
+═══════════════════════════════════════════════════════════════════════════
+NEPALI CITIZENSHIP CARD (नागरिकता पत्र)
+═══════════════════════════════════════════════════════════════════════════
+The physical FRONT is the NEPALI side (has the passport photo).
+The physical BACK is the ENGLISH side (has fingerprints).
+
+NEPALI SIDE (front / IMAGE 1 when two images are provided) — extract:
+  full_name_nepali            Devanagari name exactly as printed (नाम थर)
+  date_of_birth_bs            from "साल: YYYY महिना: MM गते: DD" → "YYYY-MM-DD"
+  birth_place_district        Devanagari district (जन्म स्थान: जिल्ला)
+  birth_place_municipality    Devanagari municipality / VDC (न.पा. / गा.वि.स.)
+  permanent_address_district  Devanagari district (स्थायी बासस्थान: जिल्ला)
+  permanent_address_municipality  Devanagari municipality
+  issued_district             Devanagari issuing district (जिल्ला प्रशासन कार्यालय)
+  issued_date_bs              issuing officer date "जारी मिति" → "YYYY-MM-DD" (BS digits)
+  father_name_nepali          father's full Devanagari name (बाबुको नाम थर)
+  father_name_english         romanized transliteration of father's name
+  mother_name_nepali          mother's full Devanagari name (आमाको नाम थर)
+  mother_name_english         romanized transliteration of mother's name
+  spouse_name_nepali          spouse's Devanagari name (पति/पत्नीको नामथर); null if "XXX" or blank
+  spouse_name_english         romanized transliteration; null if no spouse
+
+ENGLISH SIDE (back / IMAGE 2 when two images are provided) — extract:
+  citizenship_number     Pattern: ^\d{2}-\d{2}-\d{2}-\d{5}$  e.g. "75-01-79-06164"
+  full_name_english      ALL-CAPS Latin exactly as printed (Full Name)
+  gender                 map Sex field: "Male"→"male", "Female"→"female", "Others"→"other"
+  date_of_birth_ad       format "Year:YYYY Month:MMM Day:DD"
+                         Month map: JAN=01 FEB=02 MAR=03 APR=04 MAY=05 JUN=06
+                                    JUL=07 AUG=08 SEP=09 OCT=10 NOV=11 DEC=12
+                         Output as "YYYY-MM-DD"  e.g. "2006-06-16"
+  birth_place_district_english       district name in Latin (Birth Place: District)
+  birth_place_municipality_english   municipality name in Latin (Municipality)
+  birth_place_ward_number            ward integer as string (Ward No.)
+  permanent_address_district_english (Permanent Address: District)
+  permanent_address_municipality_english (Municipality)
+  permanent_address_ward_number      ward integer as string (Ward No.)
+  issued_district_english            issuing district in Latin
+
+Return this merged JSON for citizenship (set null for any field not visible):
 {
   "document_type": "citizenship",
   "citizenship_number": "",
-  "full_name_nepali": "",
   "full_name_english": "",
+  "full_name_nepali": "",
   "gender": "male|female|other",
-  "date_of_birth_bs": "YYYY-MM-DD",
   "date_of_birth_ad": "YYYY-MM-DD",
-  "birth_place_district": "",
+  "date_of_birth_bs": "YYYY-MM-DD",
   "birth_place_district_english": "",
-  "birth_place_vdc": "",
-  "birth_place_vdc_english": "",
-  "permanent_address_district": "",
+  "birth_place_district": "",
+  "birth_place_municipality_english": "",
+  "birth_place_municipality": "",
+  "birth_place_ward_number": "",
   "permanent_address_district_english": "",
-  "permanent_address_municipality": "",
+  "permanent_address_district": "",
   "permanent_address_municipality_english": "",
-  "ward_number": "",
+  "permanent_address_municipality": "",
+  "permanent_address_ward_number": "",
+  "issued_district_english": "",
   "issued_district": "",
-  "issued_district_english": ""
+  "issued_date_bs": "",
+  "father_name_nepali": null,
+  "father_name_english": null,
+  "mother_name_nepali": null,
+  "mother_name_english": null,
+  "spouse_name_nepali": null,
+  "spouse_name_english": null
 }
 
-If document is Nepali National ID Card (राष्ट्रिय परिचयपत्र) return:
+═══════════════════════════════════════════════════════════════════════════
+NATIONAL ID CARD (राष्ट्रिय परिचयपत्र)
+═══════════════════════════════════════════════════════════════════════════
 {
   "document_type": "nid",
   "nin": "",
@@ -81,7 +134,9 @@ If document is Nepali National ID Card (राष्ट्रिय परिच
   "mobile_number": null
 }
 
-If document is a Nepali Driving License return:
+═══════════════════════════════════════════════════════════════════════════
+DRIVING LICENSE
+═══════════════════════════════════════════════════════════════════════════
 {
   "document_type": "driving_license",
   "dl_number": "",
@@ -93,52 +148,40 @@ If document is a Nepali Driving License return:
   "date_of_expiry": "YYYY-MM-DD"
 }
 
-If document cannot be identified return:
-{
-  "document_type": "unknown"
-}
+If the document cannot be identified:
+{ "document_type": "unknown" }
 
-Rules:
-- Read the citizenship date of birth from the line "साल XXXX महिना XX गते XX"
-  where साल = year, महिना = month, गते = day. Convert to YYYY-MM-DD.
-  Read the महिना (month) digits especially carefully (e.g. ०२ = 02, not 09).
-- For citizenship date_of_birth_ad: subtract 57 from the BS year if BS month
-  <= 9, else subtract 56. Keep the same month and day.
-- For gender on citizenship: पुरुष=male, महिला=female, अन्य=other.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GENERAL RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Citizenship BS DOB: "साल: YYYY महिना: MM गते: DD" → YYYY-MM-DD.
+  महिना (month) digits: read carefully (e.g. ०२=02, not 09).
+- Citizenship AD DOB: parse "Year:YYYY Month:MMM Day:DD" from the front exactly
+  using the month map above. Do NOT derive it mathematically from BS here.
 - The "_nepali" fields keep the original Devanagari script exactly as printed.
-- The "_english" fields are the romanized (transliterated) Latin spelling of
-  the corresponding Devanagari value (e.g. सानु थिड -> "Sanu Thing",
-  मकवानपुर -> "Makwanpur", हेटौंडा -> "Hetauda", पदमपोखरी -> "Padampokhari").
-- For NID, read the SURNAME (थर) and GIVEN NAME (नाम) fields separately.
-  surname_* is the surname/family name, given_name_* is the given name(s).
-  full_name_* MUST be the given name followed by the surname
-  (i.e. "<given_name> <surname>"), in the matching script.
-- nationality is always "Nepalese" for NID.
-- For a Driving License (printed mostly in Latin/English script):
-  dl_number is the "D.L.No." value (e.g. "03-06-00000000").
-  full_name is the holder "Name", address is the "Address".
-  date_of_birth_ad is the "D.O.B", date_of_issue is the "D.O.I" (date of
-  issue) and date_of_expiry is the "D.O.E" (date of expiry); convert every
-  one to YYYY-MM-DD.
-  citizenship_number is the "Citizenship No." if printed, else null.
+- The "_english" fields are romanized transliterations
+  (e.g. सानु थिड → "Sanu Thid", मकवानपुर → "Makwanpur").
+- NID: read SURNAME (थर) and GIVEN NAME (नाम) separately.
+  full_name_* = "<given_name> <surname>" in matching script.
+- Nationality is always "Nepalese" for NID cards.
+- Driving License: dl_number = "D.L.No.", full_name = "Name", address = "Address",
+  date_of_birth_ad = "D.O.B", date_of_issue = "D.O.I", date_of_expiry = "D.O.E"
+  (all converted to YYYY-MM-DD). citizenship_number = "Citizenship No." or null.
   Do NOT extract father/mother name for a driving license.
-- Use Western Arabic digits (0-9) for every number.
-- Use null for any field that is not visible or not applicable.
+- Use null for any field not visible or not applicable.
+- Output Western Arabic digits (0-9) everywhere.
 """.strip()
 
 # Required fields per document type (used for confidence scoring).
+# Only fields that are always present are listed; nullable fields are excluded.
 _REQUIRED_FIELDS = {
     "citizenship": (
         "citizenship_number",
-        "full_name_nepali",
         "full_name_english",
         "gender",
-        "date_of_birth_bs",
         "date_of_birth_ad",
-        "birth_place_district",
-        "permanent_address_district",
-        "ward_number",
-        "issued_district",
+        "permanent_address_district_english",
+        "permanent_address_ward_number",
     ),
     # mobile_number is explicitly nullable, so it is excluded.
     "nid": (
@@ -174,14 +217,27 @@ _DEVANAGARI_DIGIT_MAP = str.maketrans("०१२३४५६७८९", "0123456
 _NUMERIC_FIELDS = (
     "citizenship_number",
     "nin",
+    # legacy single ward field
     "ward_number",
+    # new explicit ward fields
+    "permanent_address_ward_number",
+    "birth_place_ward_number",
     "date_of_birth_bs",
     "date_of_birth_ad",
+    "issued_date_bs",
+    "issued_date_ad",
     "date_of_issue",
     "date_of_expiry",
     "dl_number",
     "mobile_number",
 )
+
+# Three-letter month abbreviation → zero-padded month number.
+_MONTH_ABBREV: Dict[str, str] = {
+    "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04",
+    "MAY": "05", "JUN": "06", "JUL": "07", "AUG": "08",
+    "SEP": "09", "OCT": "10", "NOV": "11", "DEC": "12",
+}
 
 
 def _devanagari_to_ascii(text: str) -> str:
@@ -215,6 +271,73 @@ def _compose_nid_full_name(fields: Dict[str, Any]) -> Dict[str, Any]:
         surname = (fields.get(f"surname_{script}") or "").strip()
         if given or surname:
             fields[f"full_name_{script}"] = f"{given} {surname}".strip()
+    return fields
+
+
+def _parse_citizenship_dob_ad(raw: str) -> Optional[str]:
+    """Parse the AD DOB printed on the citizenship front.
+
+    Handles two formats:
+      1. "Year:2006 Month:JUN Day:16"  (English front side)
+      2. "YYYY-MM-DD"                  (already normalized, pass-through)
+
+    Returns ``None`` if the string cannot be parsed.
+    """
+    if not raw:
+        return None
+    raw = raw.strip()
+    # Already in ISO format — pass-through after digit normalization.
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
+    # "Year:2006 Month:JUN Day:16" (spaces may vary)
+    m = re.search(
+        r"Year[:\s]*(\d{4})\s+Month[:\s]*([A-Za-z]{3})\s+Day[:\s]*(\d{1,2})",
+        raw,
+        re.IGNORECASE,
+    )
+    if m:
+        year = m.group(1)
+        month = _MONTH_ABBREV.get(m.group(2).upper())
+        day = m.group(3).zfill(2)
+        if month:
+            return f"{year}-{month}-{day}"
+    return None
+
+
+def _normalize_citizenship_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Post-process citizenship extracted_fields.
+
+    1. Parse the English front AD DOB (``date_of_birth_ad`` may come in as
+       "Year:YYYY Month:MMM Day:DD" — convert to YYYY-MM-DD).
+    2. Derive ``issued_date_ad`` from ``issued_date_bs`` via ``_bs_to_ad``.
+    3. Add a backward-compat ``ward_number`` alias for
+       ``permanent_address_ward_number`` so existing code still works.
+    4. Clean up null-ish spouse names ("XXX", "---", etc.).
+    """
+    # 1. Fix AD DOB format coming from the English front.
+    raw_dob_ad = fields.get("date_of_birth_ad", "")
+    if isinstance(raw_dob_ad, str) and raw_dob_ad:
+        parsed = _parse_citizenship_dob_ad(_devanagari_to_ascii(raw_dob_ad))
+        if parsed:
+            fields["date_of_birth_ad"] = parsed
+
+    # 2. Compute issued_date_ad if not already present.
+    if not fields.get("issued_date_ad"):
+        fields["issued_date_ad"] = _bs_to_ad(fields.get("issued_date_bs", ""))
+
+    # 3. Backward-compat ward_number alias.
+    if fields.get("permanent_address_ward_number") and not fields.get("ward_number"):
+        fields["ward_number"] = fields["permanent_address_ward_number"]
+    elif fields.get("ward_number") and not fields.get("permanent_address_ward_number"):
+        fields["permanent_address_ward_number"] = fields["ward_number"]
+
+    # 4. Clean spouse names that are placeholders.
+    _NULL_SPOUSE = {"xxx", "---", "-", "", "x", "na", "n/a"}
+    for key in ("spouse_name_nepali", "spouse_name_english"):
+        val = fields.get(key)
+        if isinstance(val, str) and val.strip().lower() in _NULL_SPOUSE:
+            fields[key] = None
+
     return fields
 
 
@@ -301,7 +424,7 @@ def _image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
 
 
 def _build_messages(image_b64: str, mime: str) -> List[Dict[str, Any]]:
-    """Build the chat messages payload with the system prompt and image."""
+    """Build the chat messages payload with the system prompt and one image."""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -311,6 +434,46 @@ def _build_messages(image_b64: str, mime: str) -> List[Dict[str, Any]]:
                 {
                     "type": "image_url",
                     "image_url": f"data:{mime};base64,{image_b64}",
+                },
+            ],
+        },
+    ]
+
+
+def _build_messages_dual(
+    front_b64: str, front_mime: str, back_b64: str, back_mime: str
+) -> List[Dict[str, Any]]:
+    """Build the chat messages payload for a two-sided citizenship card.
+
+    In Nepal, the physical FRONT of the citizenship is the Nepali side
+    (with photo, family details, BS dates), and the physical BACK is the
+    English side (with English name, AD DOB, ward numbers).  The user
+    uploads them as frontImage / backImage accordingly.
+    """
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Two images of a Nepali Citizenship Card follow. "
+                        "IMAGE 1 is the FRONT — the NEPALI side (has the photo, "
+                        "Devanagari text, family details, DOB in BS). "
+                        "IMAGE 2 is the BACK — the ENGLISH side (has English name, "
+                        "Date of Birth AD, English addresses, ward numbers, issuing info). "
+                        "Extract all fields from both sides and merge into a single "
+                        "citizenship JSON object."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": f"data:{front_mime};base64,{front_b64}",
+                },
+                {
+                    "type": "image_url",
+                    "image_url": f"data:{back_mime};base64,{back_b64}",
                 },
             ],
         },
@@ -379,16 +542,9 @@ async def extract_document(image_bytes: bytes) -> OCRResult:
         # Force all numeric fields to Western Arabic digits.
         fields = _normalize_numeric_fields(fields)
 
-        # Deterministically (re)compute the AD date of birth for citizenship
-        # cards from the BS date using the project rule.
         if document_type == "citizenship":
-            ad = _bs_to_ad(fields.get("date_of_birth_bs", ""))
-            if ad:
-                fields["date_of_birth_ad"] = ad
-
-        # For NID, guarantee full_name = "<given name> <surname>" in both
-        # scripts even if the model left the combined field blank.
-        if document_type == "nid":
+            fields = _normalize_citizenship_fields(fields)
+        elif document_type == "nid":
             fields = _compose_nid_full_name(fields)
 
         photo_region = _compute_photo_region(document_type, width, height)
@@ -423,29 +579,125 @@ async def extract_document(image_bytes: bytes) -> OCRResult:
         )
 
 
+async def extract_dual_document(
+    front_bytes: bytes, back_bytes: bytes
+) -> OCRResult:
+    """Extract citizenship fields from both the front and back images.
+
+    Sends both images to the Mistral vision model in a single request so it
+    can cross-reference fields from both sides (e.g. name in English from the
+    front, family details and BS dates from the Nepali back).
+
+    Falls back to single-image extraction on the front if the dual call fails.
+
+    Args:
+        front_bytes: Raw bytes of the citizenship front image (English side).
+        back_bytes:  Raw bytes of the citizenship back image (Nepali side).
+
+    Returns:
+        A populated :class:`OCRResult` with ``document_type = "citizenship"``.
+    """
+    start = time.perf_counter()
+    raw_text = ""
+    try:
+        from mistralai.client import Mistral
+
+        front_b64 = base64.b64encode(front_bytes).decode("ascii")
+        back_b64 = base64.b64encode(back_bytes).decode("ascii")
+        front_mime = _detect_mime(front_bytes)
+        back_mime = _detect_mime(back_bytes)
+        width, height = _image_dimensions(front_bytes)
+
+        client = Mistral(api_key=settings.MISTRAL_API_KEY)
+        response = await client.chat.complete_async(
+            model=settings.MISTRAL_MODEL,
+            messages=_build_messages_dual(front_b64, front_mime, back_b64, back_mime),
+            temperature=0,
+        )
+        raw_text = response.choices[0].message.content or ""
+
+        parsed: Dict[str, Any] = json.loads(_strip_json_fences(raw_text))
+        document_type = parsed.get("document_type", "citizenship")
+        if document_type not in ("citizenship", "nid", "driving_license", "unknown"):
+            document_type = "citizenship"
+
+        fields = {k: v for k, v in parsed.items() if k != "document_type"}
+        fields = _normalize_numeric_fields(fields)
+
+        if document_type == "citizenship":
+            fields = _normalize_citizenship_fields(fields)
+        elif document_type == "nid":
+            fields = _compose_nid_full_name(fields)
+
+        photo_region = _compute_photo_region(document_type, width, height)
+        confidence = (
+            _score_confidence(document_type, fields)
+            if document_type != "unknown"
+            else 0.10
+        )
+
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return OCRResult(
+            document_type=document_type,
+            extracted_fields=fields,
+            raw_text=raw_text,
+            confidence_score=confidence,
+            processing_time_ms=elapsed_ms,
+            photo_region=photo_region,
+            thumbnail_region=None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Mistral dual-image OCR extraction failed; falling back")
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        detail = raw_text or f"{type(exc).__name__}: {exc}"
+        return OCRResult(
+            document_type="citizenship",
+            extracted_fields={},
+            raw_text=detail,
+            confidence_score=0.0,
+            processing_time_ms=elapsed_ms,
+            photo_region=_compute_photo_region(
+                "citizenship", *_image_dimensions(front_bytes)
+            ),
+            thumbnail_region=None,
+        )
+
+
 def supported_documents() -> List[Dict[str, Any]]:
     """Return the supported document types and their extractable fields."""
     return [
         {
             "document_type": "citizenship",
+            "dual_image": True,
+            "notes": "Send front (English) + back (Nepali) via /ocr/extract-citizenship for best results.",
             "fields": [
                 "citizenship_number",
-                "full_name_nepali",
                 "full_name_english",
+                "full_name_nepali",
                 "gender",
-                "date_of_birth_bs",
                 "date_of_birth_ad",
-                "birth_place_district",
+                "date_of_birth_bs",
                 "birth_place_district_english",
-                "birth_place_vdc",
-                "birth_place_vdc_english",
-                "permanent_address_district",
+                "birth_place_district",
+                "birth_place_municipality_english",
+                "birth_place_municipality",
+                "birth_place_ward_number",
                 "permanent_address_district_english",
-                "permanent_address_municipality",
+                "permanent_address_district",
                 "permanent_address_municipality_english",
+                "permanent_address_municipality",
+                "permanent_address_ward_number",
                 "ward_number",
-                "issued_district",
                 "issued_district_english",
+                "issued_district",
+                "issued_date_bs",
+                "issued_date_ad",
+                "father_name_nepali",
+                "father_name_english",
+                "mother_name_nepali",
+                "mother_name_english",
+                "spouse_name_nepali",
+                "spouse_name_english",
             ],
         },
         {

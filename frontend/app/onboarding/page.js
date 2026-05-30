@@ -11,13 +11,45 @@ import PersonalInfoStep from "../components/steps/PersonalInfoStep";
 import UploadDocumentStep from "../components/steps/UploadDocumentStep";
 import { addSubmission } from "../admin/submissions";
 
+// Document-first flow: upload the ID first so OCR can pre-fill the review form.
 const steps = [
-  { id: 1, label: "Basic Info" },
-  { id: 2, label: "Upload Document" },
+  { id: 1, label: "Upload Document" },
+  { id: 2, label: "Review Info" },
   { id: 3, label: "Face Verification" },
 ];
 
 const documentTypes = ["Passport", "Citizenship", "Driving License"];
+
+const EMPTY_FORM = {
+  nationality: "",
+  fullName: "",
+  dob: "",
+  gender: "",
+  familySide: "",
+  fatherName: "",
+  grandfatherName: "",
+  motherName: "",
+  grandmotherName: "",
+  maritalStatus: "",
+  currentProvince: "",
+  currentDistrict: "",
+  currentMunicipality: "",
+  currentWard: "",
+  currentStreet: "",
+  permanentSame: false,
+  permanentProvince: "",
+  permanentDistrict: "",
+  permanentMunicipality: "",
+  permanentWard: "",
+  permanentStreet: "",
+  occupation: "",
+  panNumber: "",
+  phone: "",
+  email: "",
+  documentNumber: "",
+  documentIssuedDate: "",
+  documentIssuedPlace: "",
+};
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -29,36 +61,7 @@ export default function OnboardingPage() {
   const [docBackFile, setDocBackFile] = useState(null);
   const [docFrontPreviewUrl, setDocFrontPreviewUrl] = useState("");
   const [docBackPreviewUrl, setDocBackPreviewUrl] = useState("");
-  const [formData, setFormData] = useState({
-    nationality: "",
-    fullName: "",
-    dob: "",
-    gender: "",
-    familySide: "",
-    fatherName: "",
-    grandfatherName: "",
-    motherName: "",
-    grandmotherName: "",
-    maritalStatus: "",
-    currentProvince: "",
-    currentDistrict: "",
-    currentMunicipality: "",
-    currentWard: "",
-    currentStreet: "",
-    permanentSame: false,
-    permanentProvince: "",
-    permanentDistrict: "",
-    permanentMunicipality: "",
-    permanentWard: "",
-    permanentStreet: "",
-    occupation: "",
-    panNumber: "",
-    phone: "",
-    email: "",
-    documentNumber: "",
-    documentIssuedDate: "",
-    documentIssuedPlace: "",
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_FORM });
   const [formErrors, setFormErrors] = useState({});
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
@@ -73,10 +76,13 @@ export default function OnboardingPage() {
   const [sessionId, setSessionId] = useState(null);
   const [riskFlags, setRiskFlags] = useState({});
   const [ocrData, setOcrData] = useState(null);
+  const [ocrPrefilledKeys, setOcrPrefilledKeys] = useState([]);
+  const [editComparison, setEditComparison] = useState(null);
   const [forgeryDecision, setForgeryDecision] = useState(null);
   const [forgeryScore, setForgeryScore] = useState(null);
   const [forgeryDetails, setForgeryDetails] = useState(null);
   const [documentUrl, setDocumentUrl] = useState(null);
+  const [documentBackUrl, setDocumentBackUrl] = useState(null);
   const [documentFaceUrl, setDocumentFaceUrl] = useState(null);
   const [selfieUrl, setSelfieUrl] = useState(null);
   const [faceIsMatch, setFaceIsMatch] = useState(null);
@@ -225,8 +231,43 @@ export default function OnboardingPage() {
   const validateEmail = (value) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
-  const validateStepOne = () => {
+  // Step 1 — document upload only (no metadata fields)
+  const validateDocument = () => {
     const errors = {};
+
+    if (documentType === "Citizenship") {
+      if (!docFrontFile) {
+        errors.documentFront = "Please upload the front of your citizenship.";
+      }
+      if (!docBackFile) {
+        errors.documentBack = "Please upload the back of your citizenship.";
+      }
+    } else if (!docFile) {
+      errors.document = "Please upload a document to continue.";
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Step 2 — document details + personal info (OCR-prefilled, user-edited)
+  const validatePersonalInfo = () => {
+    const errors = {};
+
+    if (!formData.documentNumber.trim()) {
+      errors.documentNumber =
+        documentType === "Citizenship"
+          ? "Citizenship number is required."
+          : "Document number is required.";
+    }
+
+    if (!formData.documentIssuedDate.trim()) {
+      errors.documentIssuedDate = "Issued date is required.";
+    }
+
+    if (!formData.documentIssuedPlace.trim()) {
+      errors.documentIssuedPlace = "Issued place is required.";
+    }
 
     if (!formData.nationality.trim()) {
       errors.nationality = "Nationality is required.";
@@ -321,39 +362,6 @@ export default function OnboardingPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const validateStepTwo = () => {
-    const errors = {};
-
-    if (!formData.documentNumber.trim()) {
-      errors.documentNumber =
-        documentType === "Citizenship"
-          ? "Citizenship number is required."
-          : "Document number is required.";
-    }
-
-    if (!formData.documentIssuedDate.trim()) {
-      errors.documentIssuedDate = "Issued date is required.";
-    }
-
-    if (!formData.documentIssuedPlace.trim()) {
-      errors.documentIssuedPlace = "Issued place is required.";
-    }
-
-    if (documentType === "Citizenship") {
-      if (!docFrontFile) {
-        errors.documentFront = "Please upload the front of your citizenship.";
-      }
-      if (!docBackFile) {
-        errors.documentBack = "Please upload the back of your citizenship.";
-      }
-    } else if (!docFile) {
-      errors.document = "Please upload a document to continue.";
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
   const formatTimestamp = (date) => {
     const datePart = date.toLocaleDateString("en-US", {
       month: "short",
@@ -374,43 +382,75 @@ export default function OnboardingPage() {
     return `KYC-${stamp}-${rand}`;
   };
 
-  const fileToDataUrl = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-
   const onNext = async () => {
-    if (step === 1 && !validateStepOne()) {
-      return;
-    }
-
+    // ── STEP 1: Upload document → OCR + forgery, then pre-fill the form ──────
     if (step === 1) {
+      if (!validateDocument()) {
+        return;
+      }
+
       setIsStepLoading(true);
       setSubmitError("");
       try {
-        const submissionSpeedMs = Date.now() - pageLoadTimeRef.current;
-        const res = await fetch("http://localhost:5000/api/v1/onboarding/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...formData,
-            deviceFingerprint: deviceFingerprint || null,
-            submissionSpeedMs,
-          }),
-        });
+        const fd = new FormData();
+        fd.append("documentType", documentType);
+        if (deviceFingerprint) fd.append("deviceFingerprint", deviceFingerprint);
+
+        if (documentType === "Citizenship") {
+          if (docFrontFile) fd.append("frontImage", docFrontFile);
+          if (docBackFile) fd.append("backImage", docBackFile);
+        } else if (docFile) {
+          fd.append("frontImage", docFile);
+        }
+
+        const res = await fetch(
+          "http://localhost:5000/api/v1/onboarding/session/document",
+          { method: "POST", body: fd }
+        );
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          setSubmitError(data.error || "Could not save your info. Please try again.");
+          setSubmitError(data.error || "Could not process document. Please try again.");
           setIsStepLoading(false);
           return;
         }
 
         setSessionId(data.sessionId);
+        setOcrData(data.ocrData || null);
+        setForgeryDecision(data.forgeryDecision || null);
+        setForgeryScore(data.forgeryScore ?? null);
+        setForgeryDetails(data.forgeryDetails || null);
+        setDocumentUrl(data.documentUrl || null);
+        setDocumentBackUrl(data.documentBackUrl || null);
+        setDocumentFaceUrl(data.documentFaceUrl || null);
         setRiskFlags(data.riskFlags || {});
+
+        // Pre-fill the Review step from the OCR-extracted values. We only fill
+        // empty fields so we never clobber anything the user already typed.
+        const prefill = data.prefill || {};
+        const prefillKeys = Object.keys(prefill).filter((k) => prefill[k]);
+        if (prefillKeys.length > 0) {
+          // If OCR filled both current and permanent address with the same
+          // values, check "same as current" so the user doesn't have to fill
+          // both sections.
+          const sameAddr =
+            prefill.currentProvince &&
+            prefill.permanentProvince &&
+            prefill.currentProvince === prefill.permanentProvince &&
+            prefill.currentDistrict === prefill.permanentDistrict;
+
+          setFormData((current) => {
+            const next = { ...current };
+            for (const key of prefillKeys) {
+              if (!next[key]) next[key] = prefill[key];
+            }
+            if (sameAddr) next.permanentSame = true;
+            return next;
+          });
+          setOcrPrefilledKeys(prefillKeys);
+        }
+        // Reset the "form fill" timer — Step 2 is the real human-input step.
+        pageLoadTimeRef.current = Date.now();
       } catch {
         setSubmitError("Could not reach the server. Please check your connection.");
         setIsStepLoading(false);
@@ -421,47 +461,39 @@ export default function OnboardingPage() {
       return;
     }
 
-    if (step === 2 && !validateStepTwo()) {
-      return;
-    }
-
+    // ── STEP 2: Review/edit personal info → tamper check vs OCR baseline ─────
     if (step === 2) {
+      if (!validatePersonalInfo()) {
+        return;
+      }
+
       setIsStepLoading(true);
       setSubmitError("");
       try {
-        const fd = new FormData();
-        fd.append("documentType", documentType);
-        fd.append("documentNumber", formData.documentNumber.trim());
-        fd.append("documentIssuedDate", formData.documentIssuedDate.trim());
-        fd.append("documentIssuedPlace", formData.documentIssuedPlace.trim());
-
-        if (documentType === "Citizenship") {
-          if (docFrontFile) fd.append("frontImage", docFrontFile);
-          if (docBackFile) fd.append("backImage", docBackFile);
-        } else {
-          if (docFile) fd.append("frontImage", docFile);
-        }
-
+        const submissionSpeedMs = Date.now() - pageLoadTimeRef.current;
         const sid = sessionId || "unknown";
         const res = await fetch(
-          `http://localhost:5000/api/v1/onboarding/session/${sid}/document`,
-          { method: "PUT", body: fd }
+          `http://localhost:5000/api/v1/onboarding/session/${sid}/personal-info`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...formData,
+              deviceFingerprint: deviceFingerprint || null,
+              submissionSpeedMs,
+            }),
+          }
         );
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          setSubmitError(data.error || "Could not process document. Please try again.");
+          setSubmitError(data.error || "Could not save your info. Please try again.");
           setIsStepLoading(false);
           return;
         }
 
-        setOcrData(data.ocrData || null);
-        setForgeryDecision(data.forgeryDecision || null);
-        setForgeryScore(data.forgeryScore ?? null);
-        setForgeryDetails(data.forgeryDetails || null);
-        setDocumentUrl(data.documentUrl || null);
-        setDocumentFaceUrl(data.documentFaceUrl || null);
         setRiskFlags(data.riskFlags || {});
+        setEditComparison(data.editComparison || null);
       } catch {
         setSubmitError("Could not reach the server. Please check your connection.");
         setIsStepLoading(false);
@@ -472,6 +504,7 @@ export default function OnboardingPage() {
       return;
     }
 
+    // ── STEP 3: Face verification + final submission ─────────────────────────
     if (step === 3) {
       setSubmitError("");
       setIsStepLoading(true);
@@ -489,6 +522,8 @@ export default function OnboardingPage() {
         // ── 1. Send selfies to backend ──────────────────────────────────────
         let backendRiskScore = null;
         let backendRiskFlags = {};
+        let backendSelfieUrl = selfieUrl;
+        let backendFaceIsMatch = faceIsMatch;
 
         if (sessionId && faceCaptures.front) {
           const fd = new FormData();
@@ -506,25 +541,29 @@ export default function OnboardingPage() {
           );
           const data = await res.json();
 
-          if (res.ok && data.success) {
-            backendRiskScore = data.riskScore;
-            backendRiskFlags = data.riskFlags || {};
-            setRiskFlags(backendRiskFlags);
-            if (data.selfieUrl) setSelfieUrl(data.selfieUrl);
-            if (data.isMatch !== undefined) setFaceIsMatch(data.isMatch);
+          if (!res.ok || !data.success) {
+            setSubmitError(
+              data.error || "Could not upload selfies. Please try again."
+            );
+            setIsStepLoading(false);
+            return;
+          }
+
+          backendRiskScore = data.riskScore;
+          backendRiskFlags = data.riskFlags || {};
+          setRiskFlags(backendRiskFlags);
+          if (data.selfieUrl) {
+            backendSelfieUrl = data.selfieUrl;
+            setSelfieUrl(data.selfieUrl);
+          }
+          if (data.isMatch !== undefined) {
+            backendFaceIsMatch = data.isMatch;
+            setFaceIsMatch(data.isMatch);
           }
         }
 
-        // ── 2. Build localStorage submission for admin panel ────────────────
-        const documentImage =
-          documentType === "Citizenship"
-            ? docFrontFile ? await fileToDataUrl(docFrontFile) : ""
-            : docFile ? await fileToDataUrl(docFile) : "";
-        const documentBackImage =
-          documentType === "Citizenship" && docBackFile
-            ? await fileToDataUrl(docBackFile)
-            : "";
-
+        // ── 2. Build localStorage submission for admin panel ───────────────
+        // Use Cloudinary URLs — not base64 — so we stay within localStorage limits.
         const submission = {
           id: createSubmissionId(),
           sessionId: sessionId || null,
@@ -560,7 +599,7 @@ export default function OnboardingPage() {
           riskScore: backendRiskScore ?? 52,
           riskFlags: backendRiskFlags,
           faceSimilarity: backendRiskFlags.face_similarity ?? null,
-          faceIsMatch: faceIsMatch,
+          faceIsMatch: backendFaceIsMatch,
           submittedAt: formatTimestamp(new Date()),
           channel: "Web",
           documentType,
@@ -571,19 +610,21 @@ export default function OnboardingPage() {
             documentType === "Citizenship" ? docFrontFile?.name || "" : docFile?.name || "",
           documentBackFileName:
             documentType === "Citizenship" ? docBackFile?.name || "" : "",
-          documentImage,
-          documentBackImage,
+          documentImage: documentUrl || "",
+          documentBackImage: documentBackUrl || "",
           faceCaptures,
           faceVideoUrl,
           address: formData.currentProvince.trim(),
           // ML analysis data
           ocrData: ocrData,
+          ocrEditComparison: editComparison,
           forgeryDecision: forgeryDecision,
           forgeryScore: forgeryScore,
           forgeryDetails: forgeryDetails,
           documentUrl: documentUrl,
+          documentBackUrl: documentBackUrl,
           documentFaceUrl: documentFaceUrl,
-          selfieUrl: selfieUrl,
+          selfieUrl: backendSelfieUrl,
         };
         addSubmission(submission);
         if (streamRef.current) {
@@ -594,13 +635,16 @@ export default function OnboardingPage() {
         setIsSubmitted(true);
       } catch (error) {
         setIsStepLoading(false);
-        setSubmitError("Unable to submit right now. Please try again.");
+        const message =
+          error?.name === "QuotaExceededError"
+            ? "Submission is too large to save locally. Please clear old KYC data in admin and try again."
+            : error?.message?.includes("Cloudinary")
+              ? "Could not upload verification photos. Please try again."
+              : "Unable to submit right now. Please try again.";
+        setSubmitError(message);
+        console.error("Onboarding submit failed:", error);
       }
       return;
-    }
-
-    if (step < 3) {
-      setStep((current) => Math.min(current + 1, 3));
     }
   };
 
@@ -612,7 +656,18 @@ export default function OnboardingPage() {
     if (isStepLoading) return false;
 
     if (step === 1) {
+      const hasDocumentUploads =
+        documentType === "Citizenship"
+          ? Boolean(docFrontFile) && Boolean(docBackFile)
+          : Boolean(docFile);
+      return hasDocumentUploads;
+    }
+
+    if (step === 2) {
       return (
+        formData.documentNumber.trim() &&
+        formData.documentIssuedDate.trim() &&
+        formData.documentIssuedPlace.trim() &&
         formData.nationality.trim() &&
         formData.fullName.trim() &&
         formData.dob.trim() &&
@@ -639,25 +694,12 @@ export default function OnboardingPage() {
       );
     }
 
-    if (step === 2) {
-      const hasDocumentUploads =
-        documentType === "Citizenship"
-          ? Boolean(docFrontFile) && Boolean(docBackFile)
-          : Boolean(docFile);
-      return (
-        formData.documentNumber.trim() &&
-        formData.documentIssuedDate.trim() &&
-        formData.documentIssuedPlace.trim() &&
-        hasDocumentUploads
-      );
-    }
-
     if (step === 3) {
       return cameraReady && hasAllCaptures;
     }
 
     return true;
-  }, [cameraReady, docFile, formData, hasAllCaptures, step]);
+  }, [cameraReady, docFile, docFrontFile, docBackFile, documentType, formData, hasAllCaptures, isStepLoading, step]);
 
   const handleInputChange = (key) => (event) => {
     const value =
@@ -888,6 +930,45 @@ export default function OnboardingPage() {
     });
   };
 
+  const resetFlow = () => {
+    setIsSubmitted(false);
+    setStep(1);
+    setFormData({ ...EMPTY_FORM });
+    setFormErrors({});
+    setDocumentType("Passport");
+    setDocFile(null);
+    setDocFrontFile(null);
+    setDocBackFile(null);
+    setFaceCaptures({ front: null, left: null, right: null });
+    setSessionId(null);
+    setOcrData(null);
+    setOcrPrefilledKeys([]);
+    setEditComparison(null);
+    setForgeryDecision(null);
+    setForgeryScore(null);
+    setForgeryDetails(null);
+    setDocumentUrl(null);
+    setDocumentFaceUrl(null);
+    setSelfieUrl(null);
+    setFaceIsMatch(null);
+    setRiskFlags({});
+    pageLoadTimeRef.current = Date.now();
+  };
+
+  // Tamper signals surfaced from the OCR-vs-edit comparison (Step 2 response).
+  const editFlags = editComparison?.flags || {};
+  const hasDrasticEdit = Boolean(
+    editFlags.drastic_ocr_edit ||
+      editFlags.edited_name_mismatch ||
+      editFlags.edited_dob_mismatch ||
+      editFlags.edited_gender_mismatch ||
+      editFlags.edited_district_mismatch ||
+      editFlags.edited_ward_mismatch ||
+      editFlags.edited_father_name_mismatch ||
+      editFlags.edited_mother_name_mismatch ||
+      editFlags.edited_document_number_mismatch
+  );
+
   return (
     <div className="min-h-screen bg-[var(--canvas)] text-[var(--ink)]">
       <TopNav />
@@ -912,53 +993,7 @@ export default function OnboardingPage() {
                 Go to Admin Panel
               </Link>
               <button
-                onClick={() => {
-                  setIsSubmitted(false);
-                  setStep(1);
-                  setFormData({
-                    nationality: "",
-                    fullName: "",
-                    dob: "",
-                    gender: "",
-                    familySide: "",
-                    fatherName: "",
-                    grandfatherName: "",
-                    motherName: "",
-                    grandmotherName: "",
-                    maritalStatus: "",
-                    currentProvince: "",
-                    currentDistrict: "",
-                    currentMunicipality: "",
-                    currentWard: "",
-                    currentStreet: "",
-                    permanentSame: false,
-                    permanentProvince: "",
-                    permanentDistrict: "",
-                    permanentMunicipality: "",
-                    permanentWard: "",
-                    permanentStreet: "",
-                    occupation: "",
-                    panNumber: "",
-                    phone: "",
-                    email: "",
-                    documentNumber: "",
-                    documentIssuedDate: "",
-                    documentIssuedPlace: "",
-                  });
-                  setDocFile(null);
-                  setDocFrontFile(null);
-                  setDocBackFile(null);
-                  setFaceCaptures({ front: null, left: null, right: null });
-                  setOcrData(null);
-                  setForgeryDecision(null);
-                  setForgeryScore(null);
-                  setForgeryDetails(null);
-                  setDocumentUrl(null);
-                  setDocumentFaceUrl(null);
-                  setSelfieUrl(null);
-                  setFaceIsMatch(null);
-                  setRiskFlags({});
-                }}
+                onClick={resetFlow}
                 className="rounded-full border border-[#E2E8F0] px-6 py-3 text-sm font-semibold text-[#64748B]"
               >
                 Submit another KYC
@@ -973,22 +1008,11 @@ export default function OnboardingPage() {
 
             <section className="w-full rounded-2xl bg-white p-10 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
               {step === 1 && (
-                <PersonalInfoStep
-                  formData={formData}
-                  formErrors={formErrors}
-                  onChange={handleInputChange}
-                  dobInputRef={dobInputRef}
-                />
-              )}
-
-              {step === 2 && (
                 <UploadDocumentStep
                   documentTypes={documentTypes}
                   documentType={documentType}
                   onSelectType={handleDocumentTypeChange}
-                  formData={formData}
                   formErrors={formErrors}
-                  onFieldChange={handleInputChange}
                   isDragging={isDragging}
                   onOpenFilePicker={openFilePicker}
                   onOpenFrontFilePicker={openFrontFilePicker}
@@ -1015,67 +1039,74 @@ export default function OnboardingPage() {
                 />
               )}
 
-              {step === 3 && (
+              {step === 2 && (
                 <div className="space-y-6">
-                  {(ocrData || forgeryDecision) && (
-                    <div className="space-y-3">
-                      {forgeryDecision && forgeryDecision !== "genuine" && forgeryDecision !== "unknown" && (
-                        <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
-                          forgeryDecision === "forged"
-                            ? "border-red-200 bg-red-50"
-                            : "border-amber-200 bg-amber-50"
-                        }`}>
-                          <span className={`mt-0.5 text-base ${forgeryDecision === "forged" ? "text-red-500" : "text-amber-500"}`}>
-                            {forgeryDecision === "forged" ? "⚠" : "⚑"}
-                          </span>
-                          <div>
-                            <p className={`text-sm font-semibold ${forgeryDecision === "forged" ? "text-red-800" : "text-amber-800"}`}>
-                              {forgeryDecision === "forged"
-                                ? "Document authenticity concern detected"
-                                : "Document requires additional review"}
-                            </p>
-                            <p className={`mt-0.5 text-xs ${forgeryDecision === "forged" ? "text-red-600" : "text-amber-600"}`}>
-                              Our system flagged this document. Your application will be reviewed manually by our team.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {ocrData && (ocrData.name || ocrData.documentNumber) && (
-                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">
-                            Extracted from document
-                          </p>
-                          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-                            {ocrData.name && (
-                              <>
-                                <span className="text-xs text-[#64748B]">Name on document</span>
-                                <span className="text-xs font-medium text-[#0F172A]">{ocrData.name}</span>
-                              </>
-                            )}
-                            {ocrData.documentNumber && (
-                              <>
-                                <span className="text-xs text-[#64748B]">Document number</span>
-                                <span className="text-xs font-medium text-[#0F172A]">{ocrData.documentNumber}</span>
-                              </>
-                            )}
-                            {ocrData.documentType && (
-                              <>
-                                <span className="text-xs text-[#64748B]">Document type</span>
-                                <span className="text-xs font-medium text-[#0F172A] capitalize">{ocrData.documentType}</span>
-                              </>
-                            )}
-                          </div>
-                          {riskFlags.name_mismatch && (
-                            <p className="mt-2 text-xs text-amber-600">
-                              Name on document differs from the name you entered. Please ensure the details are correct.
-                            </p>
-                          )}
-                        </div>
-                      )}
+                  {ocrPrefilledKeys.length > 0 && (
+                    <div className="flex items-start gap-3 rounded-xl border border-[rgba(82,196,26,0.3)] bg-[rgba(82,196,26,0.08)] px-4 py-3">
+                      <span className="mt-0.5 text-base text-[var(--brand)]">✓</span>
+                      <div>
+                        <p className="text-sm font-semibold text-[#0F172A]">
+                          We pre-filled these fields from your document
+                        </p>
+                        <p className="mt-0.5 text-xs text-[#64748B]">
+                          OCR isn&apos;t always perfect — please review every field and fix
+                          anything that looks wrong before continuing.
+                        </p>
+                      </div>
                     </div>
                   )}
 
+                  {forgeryDecision &&
+                    forgeryDecision !== "genuine" &&
+                    forgeryDecision !== "unknown" && (
+                      <div
+                        className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
+                          forgeryDecision === "forged"
+                            ? "border-red-200 bg-red-50"
+                            : "border-amber-200 bg-amber-50"
+                        }`}
+                      >
+                        <span
+                          className={`mt-0.5 text-base ${
+                            forgeryDecision === "forged" ? "text-red-500" : "text-amber-500"
+                          }`}
+                        >
+                          {forgeryDecision === "forged" ? "⚠" : "⚑"}
+                        </span>
+                        <div>
+                          <p
+                            className={`text-sm font-semibold ${
+                              forgeryDecision === "forged" ? "text-red-800" : "text-amber-800"
+                            }`}
+                          >
+                            {forgeryDecision === "forged"
+                              ? "Document authenticity concern detected"
+                              : "Document requires additional review"}
+                          </p>
+                          <p
+                            className={`mt-0.5 text-xs ${
+                              forgeryDecision === "forged" ? "text-red-600" : "text-amber-600"
+                            }`}
+                          >
+                            Our system flagged this document. Your application will be
+                            reviewed manually by our team.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                  <PersonalInfoStep
+                    documentType={documentType}
+                    formData={formData}
+                    formErrors={formErrors}
+                    onChange={handleInputChange}
+                    dobInputRef={dobInputRef}
+                  />
+                </div>
+              )}
+
+              {step === 3 && (
+                <div className="space-y-6">
                   <FaceVerificationStep
                     cameraReady={cameraReady}
                     cameraError={cameraError}
@@ -1150,7 +1181,69 @@ export default function OnboardingPage() {
               );
             })() : null}
 
-            {step === 2 && Object.keys(riskFlags).length > 0 ? (
+            {step >= 2 && hasDrasticEdit ? (
+              <div className="w-full max-w-4xl rounded-xl border border-amber-300 bg-amber-50 px-5 py-4">
+                <p className="text-sm font-semibold text-amber-800">
+                  Heads up — some details differ significantly from your document.
+                </p>
+                <p className="mt-1 text-xs text-amber-700">
+                  The values you submitted diverge from what we read on your ID, so this
+                  application will get extra manual review.
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-amber-700">
+                  {editFlags.edited_name_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Name differs notably from the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_dob_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Date of birth doesn&apos;t match the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_gender_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Gender doesn&apos;t match the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_district_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Permanent district differs from the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_ward_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Ward number differs from the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_father_name_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Father&apos;s name differs notably from the document.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_document_number_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Document number differs from what was read on your ID.</span>
+                    </li>
+                  )}
+                  {editFlags.edited_mother_name_mismatch && (
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5">•</span>
+                      <span>Mother&apos;s name differs notably from the document.</span>
+                    </li>
+                  )}
+                </ul>
+              </div>
+            ) : null}
+
+            {Object.keys(riskFlags).length > 0 ? (
               <div className="w-full max-w-4xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                 <p className="text-sm font-semibold text-amber-800">
                   Heads up — we found some similarities with existing records.
@@ -1193,7 +1286,7 @@ export default function OnboardingPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                     </svg>
-                    Saving…
+                    {step === 1 ? "Reading document…" : "Saving…"}
                   </span>
                 ) : (
                   <>

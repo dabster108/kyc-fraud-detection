@@ -103,7 +103,22 @@ const writeStoredSubmissions = (items) => {
     return;
   }
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch (error) {
+    if (error?.name === "QuotaExceededError") {
+      // Drop heavy face capture blobs and retry once.
+      const trimmed = items.map((item) => ({
+        ...item,
+        faceCaptures: {},
+        documentImage: item.documentUrl || item.documentImage || "",
+        documentBackImage: item.documentBackUrl || item.documentBackImage || "",
+      }));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+      return;
+    }
+    throw error;
+  }
 };
 
 export const getStoredSubmissions = () => readStoredSubmissions();

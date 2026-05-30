@@ -1,7 +1,14 @@
 const express = require("express");
 const multer = require("multer");
 const router = express.Router();
-const { createSession, getSession, processDocument, processSelfie } = require("../controllers/onboardingController");
+const {
+  createSession,
+  getSession,
+  processDocument,
+  processSelfie,
+  startWithDocument,
+  submitPersonalInfo,
+} = require("../controllers/onboardingController");
 
 // Keep files in memory so we can forward the buffer to Cloudinary + FastAPI
 const upload = multer({
@@ -13,8 +20,22 @@ const upload = multer({
   },
 });
 
-// POST /api/v1/onboarding/session             — Step 1 submit
+// POST /api/v1/onboarding/session             — (legacy) personal-info-first Step 1
 router.post("/session", createSession);
+
+// ── Document-first flow ────────────────────────────────────────────────────
+// POST /api/v1/onboarding/session/document    — Step 1: upload document + OCR
+router.post(
+  "/session/document",
+  upload.fields([
+    { name: "frontImage", maxCount: 1 },
+    { name: "backImage", maxCount: 1 },
+  ]),
+  startWithDocument
+);
+
+// PUT  /api/v1/onboarding/session/:sessionId/personal-info — Step 2: review/edit
+router.put("/session/:sessionId/personal-info", submitPersonalInfo);
 
 // GET  /api/v1/onboarding/session/:sessionId  — fetch session (resume / admin)
 router.get("/session/:sessionId", getSession);

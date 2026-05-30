@@ -35,10 +35,6 @@ _ALLOWED_CONTENT_TYPES = {
 
 
 def _max_upload_bytes() -> int:
-    return settings.MAX_UPLOAD_MB * 1024 * 1024
-
-
-def _max_upload_bytes() -> int:
     """Return the configured maximum upload size in bytes."""
     return settings.MAX_UPLOAD_MB * 1024 * 1024
 
@@ -95,15 +91,14 @@ async def extract(
         ) from exc
 
     if result.is_duplicate and result.duplicate_match is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "duplicate_face_detected",
-                "message": "This face already exists in the system.",
-                "matched_submission_id": result.duplicate_match.matched_submission_id,
-                "similarity_score": result.duplicate_match.similarity_score,
-                "matched_at": result.duplicate_match.matched_at,
-            },
+        # A verified-user face match is surfaced via the response body so the
+        # Express layer can add risk flags.  We intentionally do NOT raise a
+        # 409 here — blocking the upload would reveal that a face is known,
+        # which leaks information. Risk scoring happens server-side.
+        logger.info(
+            "Verified-face duplicate detected (similarity=%.3f) for submission %s",
+            result.duplicate_match.similarity_score,
+            result.submission_id,
         )
 
     return result

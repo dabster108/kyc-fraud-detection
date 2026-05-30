@@ -66,7 +66,10 @@ async def get_db_pool() -> Optional[asyncpg.Pool]:
         )
         return None
     try:
-        return await asyncpg.create_pool(settings.DATABASE_URL)
+        return await asyncpg.create_pool(
+            settings.DATABASE_URL,
+            statement_cache_size=0,
+        )
     except Exception as exc:  # noqa: BLE001 - never block startup on DB connect
         logger.warning(
             "Could not connect to Postgres (pgvector duplicate detection "

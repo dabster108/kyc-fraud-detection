@@ -132,8 +132,8 @@ def _to_vector_literal(embedding: np.ndarray) -> str:
 async def _find_duplicate_via_supabase(
     embedding: np.ndarray,
 ) -> Optional[DuplicateMatch]:
-    """Supabase REST fallback for duplicate detection via the
-    ``match_face_embeddings`` RPC function (see migration 002).
+    """Supabase REST fallback for verified-only duplicate detection via the
+    ``match_verified_face_embeddings`` RPC function (see migration 008).
 
     Used when the asyncpg pool is not available (e.g. ``DATABASE_URL`` not
     set).  Returns ``None`` on any error so the caller can treat it as "no
@@ -145,20 +145,41 @@ async def _find_duplicate_via_supabase(
         return None
 
     vector_list = embedding.tolist()
-    try:
-        response = client.rpc(
+    rpc_attempts = (
+        (
+            "match_verified_face_embeddings",
+            {
+                "query_embedding": vector_list,
+                "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                "match_count": 1,
+            },
+        ),
+        (
             "match_face_embeddings",
             {
                 "query_embedding": vector_list,
                 "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
                 "match_count": 1,
             },
-        ).execute()
-    except Exception:  # noqa: BLE001
-        logger.exception("Supabase RPC duplicate detection failed")
-        return None
+        ),
+    )
+    rows = None
+    for rpc_name, params in rpc_attempts:
+        try:
+            response = client.rpc(rpc_name, params).execute()
+            rows = response.data or []
+            break
+        except Exception as exc:  # noqa: BLE001
+            if rpc_name == "match_verified_face_embeddings":
+                logger.warning(
+                    "RPC %s unavailable (%s); trying legacy match_face_embeddings",
+                    rpc_name,
+                    exc,
+                )
+                continue
+            logger.warning("Supabase RPC duplicate detection failed: %s", exc)
+            return None
 
-    rows = response.data or []
     if not rows:
         return None
 
@@ -173,15 +194,26 @@ async def _find_duplicate_via_supabase(
 async def _find_duplicate(
     embedding: np.ndarray,
 ) -> Optional[DuplicateMatch]:
-    """Search for the nearest stored face via pgvector cosine similarity.
+    """Search for the nearest VERIFIED face via pgvector cosine similarity.
+
+    Only checks embeddings where ``is_verified = true`` (i.e. faces of
+    already-approved users).  Pending/unverified embeddings are intentionally
+    excluded — they are counted separately by ``_count_pending_duplicates``.
 
     Tries the asyncpg pool first (raw SQL, faster).  Falls back to the
-    Supabase REST RPC when the pool is unavailable (e.g. ``DATABASE_URL`` not
-    configured).  Returns ``None`` when no match exceeds the threshold or on
-    any unrecoverable error.
+    Supabase REST RPC when the pool is unavailable.  Returns ``None`` when no
+    match exceeds the threshold or on any unrecoverable error.
     """
     vector_literal = _to_vector_literal(embedding)
-    query = """
+    verified_query = """
+        SELECT submission_id, created_at,
+          1 - (embedding <=> $1::vector) AS similarity
+        FROM face_embeddings
+        WHERE is_verified = true
+        ORDER BY embedding <=> $1::vector
+        LIMIT 1
+    """
+    legacy_query = """
         SELECT submission_id, created_at,
           1 - (embedding <=> $1::vector) AS similarity
         FROM face_embeddings
@@ -191,14 +223,24 @@ async def _find_duplicate(
     try:
         pool = await supabase_client.get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(query, vector_literal)
+            try:
+                row = await conn.fetchrow(verified_query, vector_literal)
+            except Exception as exc:  # noqa: BLE001
+                if "is_verified" in str(exc):
+                    logger.warning(
+                        "face_embeddings.is_verified missing — run migration 008; "
+                        "using legacy duplicate search"
+                    )
+                    row = await conn.fetchrow(legacy_query, vector_literal)
+                else:
+                    raise
     except RuntimeError:
         logger.warning(
-            "DB pool unavailable; falling back to Supabase RPC for duplicate detection."
+            "DB pool unavailable; falling back to Supabase RPC for verified-face detection."
         )
         return await _find_duplicate_via_supabase(embedding)
     except Exception:  # noqa: BLE001 - try the fallback rather than giving up
-        logger.exception("asyncpg duplicate detection failed; trying Supabase RPC")
+        logger.warning("asyncpg verified-face detection failed; trying Supabase RPC")
         return await _find_duplicate_via_supabase(embedding)
 
     if row is None:
@@ -212,6 +254,61 @@ async def _find_duplicate(
             matched_at=str(row["created_at"]),
         )
     return None
+
+
+async def _count_pending_duplicates(embedding: np.ndarray) -> int:
+    """Count unverified submissions whose face is similar to ``embedding``.
+
+    These are pending sessions that haven't been approved yet.  We do NOT
+    block on them — instead the count is returned so the Express risk-scoring
+    layer can silently inflate the risk score and surface it only in the admin
+    panel.
+    """
+    vector_literal = _to_vector_literal(embedding)
+    verified_query = """
+        SELECT COUNT(*) AS cnt
+        FROM face_embeddings
+        WHERE is_verified = false
+          AND (1 - (embedding <=> $1::vector)) > $2
+    """
+    try:
+        pool = await supabase_client.get_pool()
+        async with pool.acquire() as conn:
+            try:
+                row = await conn.fetchrow(
+                    verified_query, vector_literal, settings.DUPLICATE_SIMILARITY_THRESHOLD
+                )
+            except Exception as exc:  # noqa: BLE001
+                if "is_verified" in str(exc):
+                    logger.warning(
+                        "face_embeddings.is_verified missing — pending-face count skipped"
+                    )
+                    return 0
+                raise
+        return int(row["cnt"]) if row else 0
+    except Exception:  # noqa: BLE001
+        logger.warning("asyncpg pending-face count failed; trying Supabase RPC")
+
+    # Supabase RPC fallback
+    try:
+        client = supabase_client.supabase
+        if client is not None:
+            for rpc_name in ("count_pending_face_matches",):
+                try:
+                    resp = client.rpc(
+                        rpc_name,
+                        {
+                            "query_embedding": embedding.tolist(),
+                            "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                        },
+                    ).execute()
+                    return int(resp.data) if resp.data is not None else 0
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Supabase RPC %s failed: %s", rpc_name, exc)
+    except Exception:  # noqa: BLE001
+        logger.warning("Supabase pending-face count unavailable")
+
+    return 0
 
 
 def _persist_to_supabase(
@@ -349,8 +446,10 @@ async def extract_and_save_face(
             except Exception:  # noqa: BLE001 - continue without the URL
                 logger.exception("Cloudinary upload of face crop failed")
 
-        # Step 9: duplicate detection via pgvector.
+        # Step 9: duplicate detection — verified faces only.
         duplicate_match = await _find_duplicate(embedding)
+        # Count pending (unverified) near-matches for the silent risk signal.
+        pending_duplicate_count = await _count_pending_duplicates(embedding)
 
         # Steps 10-11: persist submission + embedding (non-fatal on failure).
         embedding_saved = False
@@ -379,6 +478,7 @@ async def extract_and_save_face(
             face_region=face_region,
             is_duplicate=duplicate_match is not None,
             duplicate_match=duplicate_match,
+            pending_duplicate_count=pending_duplicate_count,
             id_image_url=id_image_url,
             face_image_url=face_image_url,
             embedding_saved=embedding_saved,

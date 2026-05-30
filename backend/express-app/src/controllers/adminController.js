@@ -109,6 +109,15 @@ exports.approveSubmission = async (req, res) => {
       [id]
     );
 
+    // 4. Mark the face embedding as verified so future KYC attempts are
+    //    checked against this person's face as a known verified identity.
+    if (s.kyc_submission_id) {
+      await client.query(
+        `UPDATE face_embeddings SET is_verified = true WHERE submission_id = $1`,
+        [s.kyc_submission_id]
+      );
+    }
+
     await client.query("COMMIT");
 
     return res.json({

@@ -67,6 +67,13 @@ class FaceExtractionResult(BaseModel):
     embedding_saved: bool = Field(
         default=False, description="Whether the embedding was persisted."
     )
+    pending_duplicate_count: int = Field(
+        default=0,
+        description=(
+            "Number of unverified (pending) submissions whose stored face "
+            "exceeds the similarity threshold. Used as a silent risk signal."
+        ),
+    )
     processing_time_ms: int = Field(
         default=0, description="End-to-end processing time in milliseconds."
     )

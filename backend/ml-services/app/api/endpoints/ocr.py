@@ -15,12 +15,15 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from typing import Optional
+
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.models.ocr_models import OCRResult
 from app.services import mistral_ocr
+from app.services.mistral_ocr import extract_dual_document
 from app.database import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -243,6 +246,60 @@ async def extract_base64(payload: Base64OCRRequest) -> OCRResponse:
         )
 
     return await _process_and_store(image_bytes)
+
+
+@router.post("/extract-citizenship", response_model=OCRResponse)
+async def extract_citizenship(
+    front_image: UploadFile = File(..., description="Citizenship front (English side)."),
+    back_image: UploadFile = File(None, description="Citizenship back (Nepali side) — optional but strongly recommended."),
+) -> OCRResponse:
+    """Extract all fields from a Nepali Citizenship Card using both sides.
+
+    Sends the front and back images to the Mistral vision model in a single
+    request so it can cross-reference English and Nepali data (name, DOB,
+    family details, ward number, etc.).  Falls back to front-only extraction
+    if the back image is not supplied.
+
+    Family fields (father, mother, spouse names) are only available when the
+    back image is provided.
+    """
+    for img in (front_image, back_image):
+        if img is None:
+            continue
+        content_type = (img.content_type or "").lower()
+        if content_type not in _ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file type for {img.filename}. Supported: jpeg, png, webp.",
+            )
+
+    front_bytes = await front_image.read()
+    if not front_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Front image is empty.",
+        )
+    if len(front_bytes) > _max_upload_bytes():
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Front image exceeds {settings.MAX_UPLOAD_MB}MB.",
+        )
+
+    back_bytes: Optional[bytes] = None
+    if back_image is not None:
+        back_bytes = await back_image.read()
+        if back_bytes and len(back_bytes) > _max_upload_bytes():
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Back image exceeds {settings.MAX_UPLOAD_MB}MB.",
+            )
+
+    if back_bytes:
+        result = await extract_dual_document(front_bytes, back_bytes)
+    else:
+        result = await _process_and_store(front_bytes)
+
+    return OCRResponse(engine_used=_ENGINE, **result.model_dump())
 
 
 @router.get("/supported-documents")

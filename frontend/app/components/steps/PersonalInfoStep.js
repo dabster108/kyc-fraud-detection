@@ -104,6 +104,7 @@ const NATIONALITY_OPTIONS = [
 ];
 
 export default function PersonalInfoStep({
+  documentType = "Passport",
   formData,
   formErrors,
   onChange,
@@ -115,6 +116,9 @@ export default function PersonalInfoStep({
         ? "border-red-400 focus:border-red-400 focus:ring-[rgba(82,196,26,0.2)]"
         : "border-[#E2E8F0] focus:border-[var(--brand)] focus:ring-[rgba(82,196,26,0.2)]"
     }`;
+
+  const documentNumberLabel =
+    documentType === "Citizenship" ? "Citizenship Number" : "Document Number";
 
   const currentDistricts =
     DISTRICTS_BY_PROVINCE[formData.currentProvince] || [];
@@ -137,6 +141,81 @@ export default function PersonalInfoStep({
           <div className="flex items-center gap-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
               1
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[#0F172A]">
+                Document details
+              </p>
+              <p className="text-xs text-[#64748B]">
+                Extracted from your upload — review and correct if needed
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-3">
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-[#475569]">
+                {documentNumberLabel} <span className="text-[#E11D48]">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.documentNumber}
+                onChange={onChange("documentNumber")}
+                className={fieldClass(formErrors.documentNumber)}
+                placeholder={
+                  documentType === "Citizenship"
+                    ? "e.g. 75-01-79-06164"
+                    : "Enter document number"
+                }
+              />
+              {formErrors.documentNumber && (
+                <p className="text-xs font-medium text-[#E11D48]">
+                  {formErrors.documentNumber}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-[#475569]">
+                Issued Date <span className="text-[#E11D48]">*</span>
+              </label>
+              <input
+                type="date"
+                value={formData.documentIssuedDate}
+                onChange={onChange("documentIssuedDate")}
+                className={fieldClass(formErrors.documentIssuedDate)}
+              />
+              {formErrors.documentIssuedDate && (
+                <p className="text-xs font-medium text-[#E11D48]">
+                  {formErrors.documentIssuedDate}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2 md:col-span-3">
+              <label className="text-sm font-medium text-[#475569]">
+                Issued Place <span className="text-[#E11D48]">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.documentIssuedPlace}
+                onChange={onChange("documentIssuedPlace")}
+                className={fieldClass(formErrors.documentIssuedPlace)}
+                placeholder="District/Office that issued the document"
+              />
+              {formErrors.documentIssuedPlace && (
+                <p className="text-xs font-medium text-[#E11D48]">
+                  {formErrors.documentIssuedPlace}
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
+              2
             </span>
             <div>
               <p className="text-sm font-semibold text-[#0F172A]">
@@ -228,7 +307,7 @@ export default function PersonalInfoStep({
         <section className="space-y-6">
           <div className="flex items-center gap-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
-              2
+              3
             </span>
             <div>
               <p className="text-sm font-semibold text-[#0F172A]">Family Information</p>
@@ -390,7 +469,7 @@ export default function PersonalInfoStep({
         <section className="space-y-6">
           <div className="flex items-center gap-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
-              3
+              4
             </span>
             <div>
               <p className="text-sm font-semibold text-[#0F172A]">Current Address</p>
@@ -494,7 +573,7 @@ export default function PersonalInfoStep({
         <section className="space-y-6">
           <div className="flex items-center gap-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
-              4
+              5
             </span>
             <div>
               <p className="text-sm font-semibold text-[#0F172A]">Permanent Address</p>
@@ -612,7 +691,7 @@ export default function PersonalInfoStep({
         <section className="space-y-6">
           <div className="flex items-center gap-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
-              5
+              6
             </span>
             <div>
               <p className="text-sm font-semibold text-[#0F172A]">Contact & Occupation</p>

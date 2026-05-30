@@ -568,5 +568,669 @@
     "confidence_score": 0.9,
     "processing_time_ms": 8801,
     "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"२००६-०४-१६\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी नं. १०\",\n  \"permanent_address_municipality_english\": \"Belauri No. 10\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "85a90c57-df12-4e00-83fd-f7796864a967",
+    "timestamp": "2026-05-30T03:39:58.539334+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 165,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "c3a135ff-5aed-46f3-a73c-f58160ce33a9",
+    "timestamp": "2026-05-30T03:40:02.243353+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी नं. १०",
+      "permanent_address_municipality_english": "Belauri No. 10",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 4593,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"2006-04-16\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी नं. १०\",\n  \"permanent_address_municipality_english\": \"Belauri No. 10\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "eedebe03-77b9-4238-bb44-02ea974ba6f6",
+    "timestamp": "2026-05-30T03:47:35.540483+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 660,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "5667df7c-9572-4df0-b6fd-056b41b01068",
+    "timestamp": "2026-05-30T03:47:39.997057+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी नं. १०",
+      "permanent_address_municipality_english": "Belauri No. 10",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 5116,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"२००६-०४-१६\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी नं. १०\",\n  \"permanent_address_municipality_english\": \"Belauri No. 10\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "374ee3bc-5662-4816-8e65-73abeda71d2a",
+    "timestamp": "2026-05-30T04:07:43.228601+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 696,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "feaabe51-6301-4626-9f81-631930273694",
+    "timestamp": "2026-05-30T04:07:48.522416+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी",
+      "permanent_address_municipality_english": "Belauri",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 5989,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"2006-06-17\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी\",\n  \"permanent_address_municipality_english\": \"Belauri\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "7df812c3-8223-4e11-ba70-5a72841aa1fc",
+    "timestamp": "2026-05-30T04:18:32.729628+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 148,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "5c65dbec-afb7-45da-898f-7f0edb918dd8",
+    "timestamp": "2026-05-30T04:18:36.828593+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी",
+      "permanent_address_municipality_english": "Belauri",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 4787,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"2006-04-16\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी\",\n  \"permanent_address_municipality_english\": \"Belauri\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "8300f201-5cd8-403e-bd5c-d13fab060e71",
+    "timestamp": "2026-05-30T06:10:54.957903+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 512,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "c3a3a6dc-75cf-4a7e-8519-21d390161f11",
+    "timestamp": "2026-05-30T06:10:59.163094+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी",
+      "permanent_address_municipality_english": "Belauri",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 5901,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"२००६-०४-१६\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी\",\n  \"permanent_address_municipality_english\": \"Belauri\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "e6c33e95-89bc-417c-9390-0e31cc16b9be",
+    "timestamp": "2026-05-30T06:23:31.471160+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 631,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "a95180d7-a5cc-4cca-bf98-8c81aacd5fc8",
+    "timestamp": "2026-05-30T06:23:35.435057+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "75-01-79-06164",
+      "full_name_nepali": "राजेन्द्र प्रसाद जोशी",
+      "full_name_english": "Rajendra Prasad Joshi",
+      "gender": "male",
+      "date_of_birth_bs": "2063-03-02",
+      "date_of_birth_ad": "2006-03-02",
+      "birth_place_district": "कञ्चनपुर",
+      "birth_place_district_english": "Kanchanpur",
+      "birth_place_vdc": "बेलौरी-१०",
+      "birth_place_vdc_english": "Belauri-10",
+      "permanent_address_district": "कञ्चनपुर",
+      "permanent_address_district_english": "Kanchanpur",
+      "permanent_address_municipality": "बेलौरी नं. १०, कविता जोशी (भत्क)",
+      "permanent_address_municipality_english": "Belauri No. 10, Kavita Joshi (Bhatk)",
+      "ward_number": "10",
+      "issued_district": "कञ्चनपुर",
+      "issued_district_english": "Kanchanpur"
+    },
+    "photo_region": [
+      0,
+      0,
+      480,
+      729
+    ],
+    "confidence_score": 0.9,
+    "processing_time_ms": 4594,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"७५-०१-७९-०६१६४\",\n  \"full_name_nepali\": \"राजेन्द्र प्रसाद जोशी\",\n  \"full_name_english\": \"Rajendra Prasad Joshi\",\n  \"gender\": \"male\",\n  \"date_of_birth_bs\": \"२०६३-०३-०२\",\n  \"date_of_birth_ad\": \"२००६-०४-१६\",\n  \"birth_place_district\": \"कञ्चनपुर\",\n  \"birth_place_district_english\": \"Kanchanpur\",\n  \"birth_place_vdc\": \"बेलौरी-१०\",\n  \"birth_place_vdc_english\": \"Belauri-10\",\n  \"permanent_address_district\": \"कञ्चनपुर\",\n  \"permanent_address_district_english\": \"Kanchanpur\",\n  \"permanent_address_municipality\": \"बेलौरी नं. १०, कविता जोशी (भत्क)\",\n  \"permanent_address_municipality_english\": \"Belauri No. 10, Kavita Joshi (Bhatk)\",\n  \"ward_number\": \"१०\",\n  \"issued_district\": \"कञ्चनपुर\",\n  \"issued_district_english\": \"Kanchanpur\"\n}\n```"
+  },
+  {
+    "id": "76f70780-eea7-4a80-b509-6e4177f353e5",
+    "timestamp": "2026-05-30T06:33:52.339742+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 1223,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "c5607e7f-bfe2-464a-b867-b93825ba55a4",
+    "timestamp": "2026-05-30T06:34:02.499904+00:00",
+    "engine_used": "mistral",
+    "document_type": "citizenship",
+    "extracted_fields": {
+      "citizenship_number": "64-02-80-00259",
+      "full_name_english": "PRAVIN ACHARYA",
+      "full_name_nepali": "प्रवीन आचार्य",
+      "gender": "male",
+      "date_of_birth_ad": "2005-04-07",
+      "date_of_birth_bs": "2062-04-07",
+      "birth_place_district_english": "Sukhet",
+      "birth_place_district": "सुखेत",
+      "birth_place_municipality_english": "Veerendra Nagar",
+      "birth_place_municipality": "वीरेन्द्रनगर",
+      "birth_place_ward_number": "11",
+      "permanent_address_district_english": "Sukhet",
+      "permanent_address_district": "सुखेत",
+      "permanent_address_municipality_english": "Veerendra Nagar",
+      "permanent_address_municipality": "वीरेन्द्रनगर",
+      "permanent_address_ward_number": "11",
+      "issued_district_english": "Sukhet",
+      "issued_district": "सुखेत",
+      "issued_date_bs": null,
+      "father_name_nepali": "यामलाल आचार्य",
+      "father_name_english": "Yamalal Acharya",
+      "mother_name_nepali": "बबिता पोखरेल",
+      "mother_name_english": "Babita Pokhrel",
+      "spouse_name_nepali": null,
+      "spouse_name_english": null
+    },
+    "photo_region": [
+      0,
+      0,
+      384,
+      570
+    ],
+    "confidence_score": 0.65,
+    "processing_time_ms": 11380,
+    "raw_text": "```json\n{\n  \"document_type\": \"citizenship\",\n  \"citizenship_number\": \"64-02-80-00259\",\n  \"full_name_english\": \"PRAVIN ACHARYA\",\n  \"full_name_nepali\": \"प्रवीन आचार्य\",\n  \"gender\": \"male\",\n  \"date_of_birth_ad\": \"1962-07-22\",\n  \"date_of_birth_bs\": \"2062-04-07\",\n  \"birth_place_district_english\": \"Sukhet\",\n  \"birth_place_district\": \"सुखेत\",\n  \"birth_place_municipality_english\": \"Veerendra Nagar\",\n  \"birth_place_municipality\": \"वीरेन्द्रनगर\",\n  \"birth_place_ward_number\": \"11\",\n  \"permanent_address_district_english\": \"Sukhet\",\n  \"permanent_address_district\": \"सुखेत\",\n  \"permanent_address_municipality_english\": \"Veerendra Nagar\",\n  \"permanent_address_municipality\": \"वीरेन्द्रनगर\",\n  \"permanent_address_ward_number\": \"11\",\n  \"issued_district_english\": \"Sukhet\",\n  \"issued_district\": \"सुखेत\",\n  \"issued_date_bs\": null,\n  \"father_name_nepali\": \"यामलाल आचार्य\",\n  \"father_name_english\": \"Yamalal Acharya\",\n  \"mother_name_nepali\": \"बबिता पोखरेल\",\n  \"mother_name_english\": \"Babita Pokhrel\",\n  \"spouse_name_nepali\": null,\n  \"spouse_name_english\": null\n}\n```"
+  },
+  {
+    "id": "6d29d9b3-9546-4255-9832-ab9e17ef2b3a",
+    "timestamp": "2026-05-30T06:39:50.917606+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 734,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "404849d4-3db5-4312-8c54-9cc92bea60b7",
+    "timestamp": "2026-05-30T07:47:34.039504+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 4248,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "7e5680ef-3754-4f68-b05a-c122bce94c92",
+    "timestamp": "2026-05-30T08:05:10.037670+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 4207,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "2b405fd7-a484-4da0-8e22-ddbbd142f27c",
+    "timestamp": "2026-05-30T08:56:38.185508+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 6109,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
   }
 ]

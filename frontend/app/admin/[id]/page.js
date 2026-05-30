@@ -12,6 +12,7 @@ import {
   UserIcon,
 } from "../../components/icons";
 import { getSubmissionById, updateSubmissionStatus } from "../submissions";
+import AdminSidebar from "../AdminSidebar";
 
 // ─── Risk flag metadata ──────────────────────────────────────────────────────
 const FLAG_META = {
@@ -49,6 +50,10 @@ const FLAG_META = {
   submission_speed_ms:         { label: "Submission Speed",              severity: "info",     desc: "Time (ms) taken to complete the onboarding form from page load to submit." },
   face_comparison_skipped:     { label: "Face Compare Skipped",          severity: "medium",   desc: "Face comparison was not performed — document embedding was not available." },
   no_face_in_selfie:           { label: "No Face Detected in Selfie",    severity: "high",     desc: "The ML model could not detect a human face in the selfie images.", impact: "+20 pts" },
+  verified_face_exists:        { label: "Verified Face Match",           severity: "critical", desc: "This face matches a face embedding belonging to an already-approved verified user.", impact: "+40 pts" },
+  verified_face_similarity:    { label: "Verified Face Similarity",      severity: "info",     desc: "Cosine similarity score (0–1) between this face and the matched verified user's face." },
+  duplicate_face_pending:      { label: "Pending Face Duplicates",       severity: "high",     desc: "A similar face was found in one or more other unverified (pending) KYC submissions.", impact: "+15–30 pts" },
+  pending_face_attempt_count:  { label: "Pending Face Match Count",      severity: "info",     desc: "Number of pending (unverified) submissions with a face similar to this applicant." },
 };
 
 const SEVERITY_STYLE = {
@@ -140,8 +145,12 @@ export default function SubmissionDetailPage() {
 
   const risk = useMemo(() => getRiskTone(submission?.riskScore || 0), [submission]);
 
-  const handleAction = (newStatus) => {
-    if (!submissionId) return;
+  const handleLogout = () => {
+    if (typeof window !== "undefined") window.localStorage.removeItem("adminAuthed");
+    router.push("/admin");
+  };
+
+  const handleAction = (newStatus) => {    if (!submissionId) return;
     updateSubmissionStatus(submissionId, newStatus);
     setSubmission((prev) => prev ? { ...prev, status: newStatus } : prev);
     setActionMsg(`Marked as ${newStatus}`);
@@ -203,28 +212,13 @@ export default function SubmissionDetailPage() {
 
   return (
     <div className="flex min-h-screen bg-[#F1F5F9]">
-      {/* Sidebar */}
-      <aside className="flex w-56 flex-shrink-0 flex-col bg-[#0F172A] text-white">
-        <div className="flex h-16 items-center gap-3 border-b border-white/10 px-4">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--brand)] text-sm font-bold">e</div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/50">eKS</p>
-            <p className="text-sm font-bold">Admin Panel</p>
-          </div>
-        </div>
-        <nav className="flex flex-1 flex-col gap-1 py-4 px-2">
-          <Link href="/admin" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-white/60 hover:bg-white/10 hover:text-white">
-            <span>⬡</span> Dashboard
-          </Link>
-          <div className="flex items-center gap-3 rounded-xl bg-[var(--brand)] px-3 py-2.5 text-sm font-semibold text-white">
-            <span>≡</span> Reviewing
-          </div>
-          <Link href="/admin" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-white/60 hover:bg-white/10 hover:text-white">
-            <span>◈</span> Analytics
-          </Link>
-        </nav>
-        {/* Applicant quick info */}
-        <div className="border-t border-white/10 p-3 space-y-2">
+      <AdminSidebar
+        activeTab="submissions"
+        onLogout={handleLogout}
+        stats={{ total: 0, flaggedCount: 0 }}
+      >
+        {/* Applicant quick-info pinned in the sidebar */}
+        <div className="space-y-2">
           <div className="flex items-center gap-2 px-2 py-1">
             <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand)]">
               {submission.name?.split(" ").map((p) => p[0]).slice(0, 2).join("")}
@@ -238,7 +232,7 @@ export default function SubmissionDetailPage() {
             {submission.status}
           </div>
         </div>
-      </aside>
+      </AdminSidebar>
 
       {/* Main */}
       <div className="flex flex-1 flex-col min-w-0">
@@ -473,11 +467,11 @@ export default function SubmissionDetailPage() {
                       <p className="text-sm text-[#94A3B8]">No document image available</p>
                     </div>
                   )}
-                  {(submission.documentBackImage) && (
+                  {(submission.documentBackImage || submission.documentBackUrl) && (
                     <div>
                       <p className="mb-1.5 text-xs font-semibold text-[#94A3B8] uppercase tracking-wide">Back</p>
                       <div className="overflow-hidden rounded-xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC]">
-                        <img src={submission.documentBackImage} alt="Document back" className="w-full object-contain max-h-64" />
+                        <img src={submission.documentBackImage || submission.documentBackUrl} alt="Document back" className="w-full object-contain max-h-64" />
                       </div>
                     </div>
                   )}
