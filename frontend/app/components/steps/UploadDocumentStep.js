@@ -4,9 +4,7 @@ export default function UploadDocumentStep({
   documentTypes,
   documentType,
   onSelectType,
-  formData,
   formErrors,
-  onFieldChange,
   isDragging,
   onOpenFilePicker,
   onOpenFrontFilePicker,
@@ -27,16 +25,7 @@ export default function UploadDocumentStep({
   frontPreviewUrl,
   backPreviewUrl,
 }) {
-  const fieldClass = (hasError) =>
-    `w-full rounded-xl border bg-[#F8FAFC] px-4 py-3 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:ring-2 ${
-      hasError
-        ? "border-red-400 focus:border-red-400 focus:ring-[rgba(225,29,72,0.2)]"
-        : "border-[#E2E8F0] focus:border-[var(--brand)] focus:ring-[rgba(82,196,26,0.2)]"
-    }`;
-
   const isCitizenship = documentType === "Citizenship";
-  const documentNumberLabel =
-    documentType === "Citizenship" ? "Citizenship Number" : "Document Number";
 
   const SingleUploadCard = () => (
     <>
@@ -184,59 +173,6 @@ export default function UploadDocumentStep({
             </button>
           );
         })}
-      </div>
-
-      <div className="grid gap-5 md:grid-cols-3">
-        <div className="space-y-2 md:col-span-2">
-          <label className="text-sm font-medium text-[#475569]">
-            {documentNumberLabel}
-          </label>
-          <input
-            type="text"
-            value={formData.documentNumber}
-            onChange={onFieldChange("documentNumber")}
-            className={fieldClass(formErrors.documentNumber)}
-            placeholder={
-              isCitizenship ? "Enter citizenship number" : "Enter document number"
-            }
-          />
-          {formErrors.documentNumber && (
-            <p className="text-xs font-medium text-[#E11D48]">
-              {formErrors.documentNumber}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-[#475569]">Issued Date</label>
-          <input
-            type="date"
-            value={formData.documentIssuedDate}
-            onChange={onFieldChange("documentIssuedDate")}
-            className={fieldClass(formErrors.documentIssuedDate)}
-          />
-          {formErrors.documentIssuedDate && (
-            <p className="text-xs font-medium text-[#E11D48]">
-              {formErrors.documentIssuedDate}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2 md:col-span-3">
-          <label className="text-sm font-medium text-[#475569]">Issued Place</label>
-          <input
-            type="text"
-            value={formData.documentIssuedPlace}
-            onChange={onFieldChange("documentIssuedPlace")}
-            className={fieldClass(formErrors.documentIssuedPlace)}
-            placeholder="District/Office that issued the document"
-          />
-          {formErrors.documentIssuedPlace && (
-            <p className="text-xs font-medium text-[#E11D48]">
-              {formErrors.documentIssuedPlace}
-            </p>
-          )}
-        </div>
       </div>
 
       {isCitizenship ? (

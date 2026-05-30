@@ -345,8 +345,7 @@ class OnboardingService {
   // ─── Step 2: Document processing ────────────────────────────────────────────
 
   /**
-   * Send an image buffer to FastAPI as multipart form-data.
-   * fieldName must match the FastAPI endpoint's File(...) parameter name.
+   * Send a single image buffer to FastAPI as multipart form-data.
    */
   async _callMLWithBuffer(endpoint, buffer, filename = "document.jpg") {
     const form = new FormData();
@@ -359,16 +358,40 @@ class OnboardingService {
   }
 
   /**
+   * Send two image buffers (front + back) to the FastAPI dual-image OCR
+   * endpoint for citizenship cards.  Field names must match the FastAPI
+   * ``File(...)`` parameter names: ``front_image`` and ``back_image``.
+   */
+  async _callDualML(endpoint, frontBuffer, backBuffer) {
+    const form = new FormData();
+    form.append("front_image", frontBuffer, {
+      filename: "front.jpg",
+      contentType: "image/jpeg",
+    });
+    form.append("back_image", backBuffer, {
+      filename: "back.jpg",
+      contentType: "image/jpeg",
+    });
+    const response = await axios.post(`${ML_URL}${endpoint}`, form, {
+      headers: form.getHeaders(),
+      timeout: ML_TIMEOUT,
+    });
+    return response.data;
+  }
+
+  /**
    * Extract the most likely name from OCR extracted_fields.
-   * Mistral OCR uses various key names depending on document type.
+   * Prefers English (Latin-script) names for cross-checking against the
+   * Latin-script name the user typed.
    */
   _extractOCRName(extractedFields = {}) {
     const candidates = [
-      extractedFields.name,
-      extractedFields.full_name,
+      extractedFields.full_name_english,   // citizenship / NID English
+      extractedFields.full_name,            // driving license / generic
       extractedFields.applicant_name,
       extractedFields.holder_name,
       extractedFields.owner_name,
+      extractedFields.full_name_nepali,     // fallback to Nepali if no English
     ];
     return (candidates.find((v) => v && typeof v === "string") || "").trim();
   }
@@ -380,6 +403,8 @@ class OnboardingService {
     const candidates = [
       extractedFields.citizenship_number,
       extractedFields.citizenship_no,
+      extractedFields.dl_number,
+      extractedFields.nin,
       extractedFields.document_number,
       extractedFields.passport_number,
       extractedFields.license_number,
@@ -478,9 +503,25 @@ class OnboardingService {
     let ocrResult = null;
     let docFaceExtraction = null;
 
+    // Declared up-front because the face-extract block below accumulates into
+    // them (document duplicate flags/score are finalised after the doc-number
+    // check further down).
+    let docDupFlags = {};
+    let docDupScore = 0;
+
+    // For citizenship with a back image, use the dual-image OCR endpoint so
+    // the model can merge data from both sides (English names, DOB, AD dates
+    // from front; Nepali names, family details, BS dates from back).
+    const isCitizenship =
+      documentType && documentType.toLowerCase() === "citizenship";
+    const ocrPromise =
+      isCitizenship && backBuffer
+        ? this._callDualML("/api/v1/ocr/extract-citizenship", frontBuffer, backBuffer)
+        : this._callMLWithBuffer("/api/v1/ocr/extract", frontBuffer, "front.jpg");
+
     const [forgeryOutcome, ocrOutcome, faceExtractOutcome] = await Promise.allSettled([
       this._callMLWithBuffer("/api/v1/forgery/verify", frontBuffer, "front.jpg"),
-      this._callMLWithBuffer("/api/v1/ocr/extract", frontBuffer, "front.jpg"),
+      ocrPromise,
       this._callMLWithBuffer("/api/v1/face/extract", frontBuffer, "front.jpg"),
     ]);
 
@@ -498,6 +539,23 @@ class OnboardingService {
 
     if (faceExtractOutcome.status === "fulfilled") {
       docFaceExtraction = faceExtractOutcome.value;
+
+      // ── Face duplicate risk scoring ─────────────────────────────────────
+      // Verified match: this face already belongs to an approved user.
+      if (docFaceExtraction.is_duplicate && docFaceExtraction.duplicate_match) {
+        docDupFlags.verified_face_exists = true;
+        docDupFlags.verified_face_similarity = docFaceExtraction.duplicate_match.similarity_score;
+        docDupScore += 40;
+      }
+
+      // Pending match: similar face seen in other unverified sessions —
+      // silent risk increase, not shown to the user.
+      const pendingCount = docFaceExtraction.pending_duplicate_count || 0;
+      if (pendingCount > 0) {
+        docDupFlags.duplicate_face_pending = true;
+        docDupFlags.pending_face_attempt_count = pendingCount;
+        docDupScore += Math.min(pendingCount * 15, 30);
+      }
     } else {
       console.warn("[onboarding] Face extract unavailable:", faceExtractOutcome.reason?.message);
     }
@@ -531,9 +589,6 @@ class OnboardingService {
     // ── 5b. Document number duplicate check ──────────────────────────────────
     // The canonical number to check is what the user entered (more reliable
     // than OCR which may have reading errors). We check against both tables.
-    let docDupFlags = {};
-    let docDupScore = 0;
-
     if (documentNumber) {
       const docNum = documentNumber.trim().toUpperCase();
       const [sessionRows, verifiedRows] = await Promise.all([
@@ -667,6 +722,8 @@ class OnboardingService {
         confidenceScore: ocrResult?.confidence_score ?? null,
         rawText: ocrResult?.raw_text || null,
       },
+      // Mapped OCR values for pre-filling the Review/Edit personal-info form.
+      prefill: this._ocrPrefill(ocrResult),
       forgeryDecision,
       forgeryScore,
       forgeryDetails: forgeryResult ? {
@@ -680,6 +737,7 @@ class OnboardingService {
         details: forgeryResult.details || {},
       } : null,
       documentUrl,
+      documentBackUrl,
       documentFaceUrl,
       kycSubmissionId,
       riskFlags: mergedRiskFlags,
@@ -821,6 +879,445 @@ class OnboardingService {
       isMatch: faceSimilarity !== null ? faceSimilarity >= 0.65 : null,
       riskFlags: mergedRiskFlags,
       riskScore: newRiskScore,
+    };
+  }
+
+  // ─── Document-first flow helpers ─────────────────────────────────────────
+
+  /**
+   * Map OCR extracted_fields onto the front-end personal-info form keys so the
+   * Review step can be pre-filled.
+   *
+   * Covers: fullName, dob, gender, fatherName, motherName, all address fields
+   * (including province reverse-mapped from district), familySide (auto-set
+   * from which parent name was extracted), maritalStatus (inferred from spouse
+   * field), and nationality.
+   */
+  _ocrPrefill(ocrResult) {
+    const f = ocrResult?.extracted_fields || {};
+    const str = (v) => (v != null ? v.toString().trim() : "");
+    const cap = (s) => {
+      const t = str(s);
+      return t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase() : "";
+    };
+
+    // District → Province reverse map (must match the frontend <select> values
+    // in PersonalInfoStep exactly).
+    const DISTRICT_TO_PROVINCE = {
+      Bhojpur:"Koshi",Dhankuta:"Koshi",Ilam:"Koshi",Jhapa:"Koshi",
+      Khotang:"Koshi",Morang:"Koshi",Okhaldhunga:"Koshi",Panchthar:"Koshi",
+      Sankhuwasabha:"Koshi",Solukhumbu:"Koshi",Sunsari:"Koshi",
+      Taplejung:"Koshi",Terhathum:"Koshi",Udayapur:"Koshi",
+      Bara:"Madhesh",Dhanusha:"Madhesh",Mahottari:"Madhesh",Parsa:"Madhesh",
+      Rautahat:"Madhesh",Saptari:"Madhesh",Sarlahi:"Madhesh",Siraha:"Madhesh",
+      Bhaktapur:"Bagmati",Chitwan:"Bagmati",Dhading:"Bagmati",Dolakha:"Bagmati",
+      Kathmandu:"Bagmati",Kavrepalanchok:"Bagmati",Lalitpur:"Bagmati",
+      Makwanpur:"Bagmati",Nuwakot:"Bagmati",Ramechhap:"Bagmati",
+      Rasuwa:"Bagmati",Sindhuli:"Bagmati",Sindhupalchok:"Bagmati",
+      Baglung:"Gandaki",Gorkha:"Gandaki",Kaski:"Gandaki",Lamjung:"Gandaki",
+      Manang:"Gandaki",Mustang:"Gandaki",Myagdi:"Gandaki",Nawalpur:"Gandaki",
+      Parbat:"Gandaki",Syangja:"Gandaki",Tanahun:"Gandaki",
+      Arghakhanchi:"Lumbini",Banke:"Lumbini",Bardiya:"Lumbini",Dang:"Lumbini",
+      "Eastern Rukum":"Lumbini",Gulmi:"Lumbini",Kapilvastu:"Lumbini",
+      Palpa:"Lumbini",Parasi:"Lumbini",Pyuthan:"Lumbini",Rolpa:"Lumbini",
+      Rupandehi:"Lumbini",
+      Dailekh:"Karnali",Dolpa:"Karnali",Humla:"Karnali",Jajarkot:"Karnali",
+      Jumla:"Karnali",Kalikot:"Karnali",Mugu:"Karnali",Salyan:"Karnali",
+      Surkhet:"Karnali","Western Rukum":"Karnali",
+      Achham:"Sudurpashchim",Baitadi:"Sudurpashchim",Bajhang:"Sudurpashchim",
+      Bajura:"Sudurpashchim",Dadeldhura:"Sudurpashchim",Darchula:"Sudurpashchim",
+      Doti:"Sudurpashchim",Kailali:"Sudurpashchim",Kanchanpur:"Sudurpashchim",
+    };
+
+    // Fuzzy-match an OCR district name against the known dropdown values.
+    // Returns the matching dropdown value, or the original string if no match.
+    const matchDistrict = (ocrVal) => {
+      if (!ocrVal) return "";
+      const lower = ocrVal.toLowerCase();
+      const exact = Object.keys(DISTRICT_TO_PROVINCE).find(
+        (d) => d.toLowerCase() === lower
+      );
+      if (exact) return exact;
+      // Try substring / prefix match (e.g. "Kanchanpur" from "Kanchanpur District")
+      const partial = Object.keys(DISTRICT_TO_PROVINCE).find(
+        (d) => lower.includes(d.toLowerCase()) || d.toLowerCase().includes(lower)
+      );
+      return partial || ocrVal;
+    };
+
+    const rawDistrict = str(
+      f.permanent_address_district_english || f.permanent_address_district
+    );
+    const district = matchDistrict(rawDistrict);
+    const province = DISTRICT_TO_PROVINCE[district] || "";
+
+    const fatherName = str(f.father_name_english || f.father_name_nepali);
+    const motherName = str(f.mother_name_english || f.mother_name_nepali);
+
+    // Auto-detect family side: if father's name is present pick father's side
+    let familySide = "";
+    if (fatherName) familySide = "Father's side";
+    else if (motherName) familySide = "Mother's side";
+
+    // Infer marital status from spouse field
+    let maritalStatus = "";
+    const spouseVal = str(f.spouse_name_english || f.spouse_name_nepali);
+    if (!spouseVal) maritalStatus = "Single";
+
+    const prefill = {
+      fullName: str(f.full_name_english || f.full_name || f.full_name_nepali),
+      dob: str(f.date_of_birth_ad),
+      gender: cap(f.gender),
+      nationality: ocrResult?.document_type === "citizenship"
+        ? "Nepali"
+        : (str(f.nationality) || ""),
+      familySide,
+      fatherName,
+      motherName,
+      maritalStatus,
+      // Permanent address (from the document)
+      permanentProvince: province,
+      permanentDistrict: district,
+      permanentMunicipality: str(
+        f.permanent_address_municipality_english || f.permanent_address_municipality
+      ),
+      permanentWard: str(f.permanent_address_ward_number || f.ward_number),
+      // Pre-fill current address with the same values (user can change later)
+      currentProvince: province,
+      currentDistrict: district,
+      currentMunicipality: str(
+        f.permanent_address_municipality_english || f.permanent_address_municipality
+      ),
+      currentWard: str(f.permanent_address_ward_number || f.ward_number),
+      // Document metadata (reviewed/edited in Step 2)
+      documentNumber: str(
+        f.citizenship_number || f.dl_number || f.nin || f.document_number
+      ),
+      documentIssuedDate: str(
+        f.issued_date_ad || f.date_of_issue || f.issued_date_bs
+      ),
+      documentIssuedPlace: str(
+        f.issued_district_english || f.issued_district
+      ),
+    };
+
+    // Drop empty/null values so we never overwrite existing user input.
+    return Object.fromEntries(
+      Object.entries(prefill).filter(([, v]) => v !== "" && v != null)
+    );
+  }
+
+  /**
+   * Fuzzy/exact comparison between the values OCR extracted from the document
+   * (the baseline) and the values the user submitted after editing.
+   *
+   * This is the anti-tamper "catch": OCR is allowed to be imperfect, so small
+   * corrections are fine — but a drastic divergence between what the document
+   * says and what the user typed is a fraud signal that raises the risk score.
+   *
+   * @returns {{ flags: object, score: number, diffs: Array }}
+   */
+  compareOcrVsEdited(ocrResult, formData = {}) {
+    const f = ocrResult?.extracted_fields || {};
+    const flags = {};
+    const diffs = [];
+    let score = 0;
+
+    const clean = (v) => (v == null ? "" : v.toString().trim());
+
+    // ── Full name (fuzzy) ────────────────────────────────────────────────
+    const ocrName = clean(f.full_name_english || f.full_name);
+    const userName = clean(formData.fullName);
+    if (ocrName && userName) {
+      const sim = compareTwoStrings(ocrName.toLowerCase(), userName.toLowerCase());
+      const pct = Math.round(sim * 100);
+      diffs.push({ field: "fullName", ocr: ocrName, edited: userName, similarity: pct });
+      flags.edited_name_similarity = pct;
+      if (sim < 0.5) {
+        flags.edited_name_mismatch = true;
+        score += 30;
+      } else if (sim < 0.8) {
+        flags.edited_name_minor_change = true;
+        score += 10;
+      }
+    }
+
+    // ── Date of birth (exact AD date) ────────────────────────────────────
+    const ocrDob = clean(f.date_of_birth_ad);
+    const userDob = clean(formData.dob);
+    if (ocrDob && userDob && ocrDob !== userDob) {
+      flags.edited_dob_mismatch = true;
+      flags.ocr_dob = ocrDob;
+      flags.user_dob = userDob;
+      score += 25;
+      diffs.push({ field: "dob", ocr: ocrDob, edited: userDob, similarity: 0 });
+    }
+
+    // ── Gender (exact, case-insensitive) ─────────────────────────────────
+    const ocrGender = clean(f.gender).toLowerCase();
+    const userGender = clean(formData.gender).toLowerCase();
+    if (ocrGender && userGender && ocrGender !== userGender) {
+      flags.edited_gender_mismatch = true;
+      score += 15;
+      diffs.push({ field: "gender", ocr: ocrGender, edited: userGender, similarity: 0 });
+    }
+
+    // ── Permanent district (fuzzy) ───────────────────────────────────────
+    const ocrDistrict = clean(
+      f.permanent_address_district_english || f.permanent_address_district
+    );
+    const userDistrict = clean(
+      formData.permanentSame ? formData.currentDistrict : formData.permanentDistrict
+    );
+    if (ocrDistrict && userDistrict) {
+      const sim = compareTwoStrings(ocrDistrict.toLowerCase(), userDistrict.toLowerCase());
+      diffs.push({
+        field: "permanentDistrict",
+        ocr: ocrDistrict,
+        edited: userDistrict,
+        similarity: Math.round(sim * 100),
+      });
+      if (sim < 0.6) {
+        flags.edited_district_mismatch = true;
+        score += 15;
+      }
+    }
+
+    // ── Permanent ward (exact) ───────────────────────────────────────────
+    const ocrWard = clean(f.permanent_address_ward_number || f.ward_number);
+    const userWard = clean(
+      formData.permanentSame ? formData.currentWard : formData.permanentWard
+    );
+    if (ocrWard && userWard && ocrWard !== userWard) {
+      flags.edited_ward_mismatch = true;
+      score += 10;
+      diffs.push({ field: "permanentWard", ocr: ocrWard, edited: userWard, similarity: 0 });
+    }
+
+    // ── Father's name (fuzzy — only compared when family side matches) ───
+    const ocrFather = clean(f.father_name_english || f.father_name_nepali);
+    const userFather = clean(formData.fatherName);
+    if (ocrFather && userFather && formData.familySide === "Father's side") {
+      const sim = compareTwoStrings(ocrFather.toLowerCase(), userFather.toLowerCase());
+      const pct = Math.round(sim * 100);
+      diffs.push({ field: "fatherName", ocr: ocrFather, edited: userFather, similarity: pct });
+      flags.edited_father_name_similarity = pct;
+      if (sim < 0.5) {
+        flags.edited_father_name_mismatch = true;
+        score += 20;
+      } else if (sim < 0.8) {
+        flags.edited_father_name_minor_change = true;
+        score += 5;
+      }
+    }
+
+    // ── Mother's name (fuzzy — only when mother's side is chosen) ────────
+    const ocrMother = clean(f.mother_name_english || f.mother_name_nepali);
+    const userMother = clean(formData.motherName);
+    if (ocrMother && userMother && formData.familySide === "Mother's side") {
+      const sim = compareTwoStrings(ocrMother.toLowerCase(), userMother.toLowerCase());
+      const pct = Math.round(sim * 100);
+      diffs.push({ field: "motherName", ocr: ocrMother, edited: userMother, similarity: pct });
+      flags.edited_mother_name_similarity = pct;
+      if (sim < 0.5) {
+        flags.edited_mother_name_mismatch = true;
+        score += 20;
+      } else if (sim < 0.8) {
+        flags.edited_mother_name_minor_change = true;
+        score += 5;
+      }
+    }
+
+    // ── Document number (exact, normalised) ──────────────────────────────
+    const ocrDocNum = this._normaliseDocNum(this._extractOCRDocNumber(f));
+    const userDocNum = this._normaliseDocNum(formData.documentNumber);
+    if (ocrDocNum && userDocNum && ocrDocNum !== userDocNum) {
+      flags.edited_document_number_mismatch = true;
+      flags.ocr_document_number = this._extractOCRDocNumber(f);
+      flags.user_document_number = formData.documentNumber;
+      score += 25;
+      diffs.push({
+        field: "documentNumber",
+        ocr: this._extractOCRDocNumber(f),
+        edited: formData.documentNumber,
+        similarity: 0,
+      });
+    }
+
+    // ── Drastic overall edit signal ──────────────────────────────────────
+    const drasticFieldCount = [
+      flags.edited_name_mismatch,
+      flags.edited_dob_mismatch,
+      flags.edited_gender_mismatch,
+      flags.edited_district_mismatch,
+      flags.edited_ward_mismatch,
+      flags.edited_father_name_mismatch,
+      flags.edited_mother_name_mismatch,
+      flags.edited_document_number_mismatch,
+    ].filter(Boolean).length;
+
+    if (flags.edited_name_mismatch || drasticFieldCount >= 2) {
+      flags.drastic_ocr_edit = true;
+    }
+
+    return { flags, score: Math.min(Math.round(score), 100), diffs };
+  }
+
+  /**
+   * Create an empty onboarding_session BEFORE any personal info is known.
+   * Used by the document-first flow where Step 1 is the document upload.
+   * `full_name` is NOT NULL in the schema, so it is seeded with an empty
+   * string and back-filled in `submitPersonalInfo`.
+   */
+  async createSessionShell(meta = {}) {
+    const { rows } = await pool.query(
+      `INSERT INTO onboarding_sessions (full_name, risk_score, risk_flags, status,
+          device_fingerprint, ip_address, user_agent)
+       VALUES ('', 0, '{}'::jsonb, 'step_1_document', $1, $2, $3)
+       RETURNING id`,
+      [
+        meta.deviceFingerprint || null,
+        meta.ipAddress || null,
+        meta.userAgent || null,
+      ]
+    );
+    return rows[0].id;
+  }
+
+  /**
+   * Document-first Step 2: persist the (OCR-prefilled, user-edited) personal
+   * info, run identity duplicate checks, and run the OCR-vs-edit tamper check.
+   * Accumulates onto the risk already gathered during the document step.
+   *
+   * @returns {{ riskFlags, riskScore, editComparison }}
+   */
+  async submitPersonalInfo(sessionId, formData, meta = {}) {
+    const session = await this.getSession(sessionId);
+    if (!session) throw new Error("Session not found");
+
+    const existingRiskScore = session.risk_score || 0;
+    const existingRiskFlags = session.risk_flags || {};
+
+    // ── Identity + behaviour duplicate checks (moved here from createSession,
+    //    because in the document-first flow these fields only exist now) ────
+    const { riskFlags: dupFlags, riskScore: dupScore } = await this.checkDuplicates({
+      email: formData.email,
+      panNumber: formData.panNumber,
+      fullName: formData.fullName,
+      dob: formData.dob,
+      phone: formData.phone || null,
+      deviceFingerprint: formData.deviceFingerprint || session.device_fingerprint || null,
+      ipAddress: meta.ipAddress || null,
+      submissionSpeedMs: formData.submissionSpeedMs ?? null,
+    });
+
+    // ── OCR-vs-edit tamper check ─────────────────────────────────────────
+    const editComparison = this.compareOcrVsEdited(session.ocr_result, formData);
+
+    // ── Document number duplicate check (now that user confirmed the number) ─
+    let docDupFlags = {};
+    let docDupScore = 0;
+    if (formData.documentNumber) {
+      const docNum = formData.documentNumber.trim().toUpperCase();
+      const [sessionRows, verifiedRows] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(*) AS cnt
+           FROM   onboarding_sessions
+           WHERE  UPPER(document_number) = $1
+             AND  id != $2
+             AND  status NOT IN ('expired')`,
+          [docNum, sessionId]
+        ),
+        pool.query(
+          `SELECT COUNT(*) AS cnt
+           FROM   verified_users
+           WHERE  UPPER(document_number) = $1`,
+          [docNum]
+        ),
+      ]);
+      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
+      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
+      if (verifiedExists) {
+        docDupFlags.verified_user_document_exists = true;
+        docDupScore += 50;
+      }
+      if (prevAttempts > 0) {
+        docDupFlags.duplicate_document_number = true;
+        docDupFlags.previous_document_attempts = prevAttempts;
+        docDupScore += Math.min(prevAttempts * 15, 30);
+      }
+    }
+
+    const mergedRiskFlags = {
+      ...existingRiskFlags,
+      ...dupFlags,
+      ...editComparison.flags,
+      ...docDupFlags,
+    };
+    const newRiskScore = Math.min(
+      Math.round(existingRiskScore + dupScore + editComparison.score + docDupScore),
+      100
+    );
+
+    // ── Resolve permanent address (respect "same as current") ────────────
+    const permanentSame = Boolean(formData.permanentSame);
+    const pick = (perm, curr) => (permanentSame ? curr : perm);
+
+    const pan = formData.panNumber ? formData.panNumber.trim().toUpperCase() : null;
+    const email = formData.email ? formData.email.trim().toLowerCase() : null;
+    const phone = formData.phone ? formData.phone.replace(/\s+/g, "") : null;
+
+    await pool.query(
+      `UPDATE onboarding_sessions SET
+         full_name = $1, dob = $2, gender = $3, nationality = $4,
+         family_side = $5, father_name = $6, grandfather_name = $7,
+         mother_name = $8, grandmother_name = $9, marital_status = $10,
+         occupation = $11, pan_number = $12, email = $13, phone_number = $14,
+         current_province = $15, current_district = $16, current_municipality = $17,
+         current_ward = $18, current_street = $19,
+         permanent_province = $20, permanent_district = $21, permanent_municipality = $22,
+         permanent_ward = $23, permanent_street = $24,
+         document_number = $25, document_issued_date = $26, document_issued_place = $27,
+         risk_score = $28, risk_flags = $29::jsonb, status = 'step_2_complete'
+       WHERE id = $30`,
+      [
+        (formData.fullName || "").trim(),
+        formData.dob || null,
+        formData.gender || null,
+        formData.nationality || null,
+        formData.familySide || null,
+        formData.fatherName || null,
+        formData.grandfatherName || null,
+        formData.motherName || null,
+        formData.grandmotherName || null,
+        formData.maritalStatus || null,
+        formData.occupation || null,
+        pan,
+        email,
+        phone,
+        formData.currentProvince || null,
+        formData.currentDistrict || null,
+        formData.currentMunicipality || null,
+        formData.currentWard || null,
+        formData.currentStreet || null,
+        pick(formData.permanentProvince, formData.currentProvince) || null,
+        pick(formData.permanentDistrict, formData.currentDistrict) || null,
+        pick(formData.permanentMunicipality, formData.currentMunicipality) || null,
+        pick(formData.permanentWard, formData.currentWard) || null,
+        pick(formData.permanentStreet, formData.currentStreet) || null,
+        formData.documentNumber?.trim() || null,
+        formData.documentIssuedDate?.trim() || null,
+        formData.documentIssuedPlace?.trim() || null,
+        newRiskScore,
+        JSON.stringify(mergedRiskFlags),
+        sessionId,
+      ]
+    );
+
+    return {
+      riskFlags: mergedRiskFlags,
+      riskScore: newRiskScore,
+      editComparison,
     };
   }
 }

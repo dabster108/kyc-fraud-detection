@@ -3,14 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getStoredSubmissions } from "./submissions";
-
-const NAV_ITEMS = [
-  { id: "overview", label: "Overview", icon: "⬡" },
-  { id: "submissions", label: "All Submissions", icon: "≡" },
-  { id: "flagged", label: "Flagged & High Risk", icon: "⚑" },
-  { id: "analytics", label: "Analytics", icon: "◈" },
-  { id: "settings", label: "Settings", icon: "⚙" },
-];
+import AdminSidebar from "./AdminSidebar";
 
 const STATUS_COLORS = {
   Approved: "bg-emerald-100 text-emerald-700",
@@ -41,7 +34,6 @@ export default function AdminPanelPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [docFilter, setDocFilter] = useState("All");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     const stored = typeof window !== "undefined" ? window.localStorage.getItem("adminAuthed") : null;
@@ -167,98 +159,12 @@ export default function AdminPanelPage() {
 
   return (
     <div className="flex min-h-screen bg-[#F1F5F9]">
-      {/* Sidebar */}
-      <aside
-        className={`flex flex-shrink-0 flex-col bg-[#0F172A] text-white transition-all duration-200 ${
-          sidebarCollapsed ? "w-16" : "w-60"
-        }`}
-      >
-        {/* Brand */}
-        <div className="flex h-16 items-center gap-3 border-b border-white/10 px-4">
-          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--brand)] text-sm font-bold text-white">
-            e
-          </div>
-          {!sidebarCollapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold uppercase tracking-widest text-white/50">eKS</p>
-              <p className="truncate text-sm font-bold text-white">Admin Panel</p>
-            </div>
-          )}
-          <button
-            onClick={() => setSidebarCollapsed((v) => !v)}
-            className="ml-auto flex-shrink-0 text-white/40 transition hover:text-white"
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {sidebarCollapsed ? "›" : "‹"}
-          </button>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto py-4 px-2">
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeTab === item.id;
-            const badge =
-              item.id === "submissions" ? stats.total :
-              item.id === "flagged" ? flaggedSubmissions.length :
-              null;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                  isActive
-                    ? "bg-[var(--brand)] text-white"
-                    : "text-white/60 hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                <span className="flex-shrink-0 text-base leading-none">{item.icon}</span>
-                {!sidebarCollapsed && (
-                  <>
-                    <span className="flex-1 text-left">{item.label}</span>
-                    {badge !== null && (
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                        isActive ? "bg-white/20 text-white" : "bg-white/10 text-white/70"
-                      }`}>
-                        {badge}
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* User footer */}
-        <div className="border-t border-white/10 p-3">
-          {!sidebarCollapsed ? (
-            <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand)]">
-                A
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold text-white">Administrator</p>
-                <p className="truncate text-xs text-white/40">admin@eks.com</p>
-              </div>
-              <button
-                onClick={handleLogout}
-                title="Logout"
-                className="flex-shrink-0 text-white/40 transition hover:text-red-400 text-sm"
-              >
-                ⏻
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleLogout}
-              title="Logout"
-              className="flex w-full items-center justify-center rounded-xl py-2 text-white/40 transition hover:text-red-400"
-            >
-              ⏻
-            </button>
-          )}
-        </div>
-      </aside>
+      <AdminSidebar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        stats={{ total: stats.total, flaggedCount: flaggedSubmissions.length }}
+        onLogout={handleLogout}
+      />
 
       {/* Main content */}
       <div className="flex flex-1 flex-col min-w-0">
@@ -266,7 +172,7 @@ export default function AdminPanelPage() {
         <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[#E2E8F0] bg-white px-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">
-              {NAV_ITEMS.find((n) => n.id === activeTab)?.label}
+              {{ overview: "Overview", submissions: "All Submissions", flagged: "Flagged & High Risk", analytics: "Analytics", settings: "Settings" }[activeTab]}
             </p>
             <p className="font-semibold text-[#0B1324]">KYC Review Dashboard</p>
           </div>
