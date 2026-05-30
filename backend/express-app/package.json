@@ -13,13 +13,17 @@
   "type": "commonjs",
   "dependencies": {
     "axios": "^1.16.1",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "form-data": "^4.0.5",
     "helmet": "^8.2.0",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "pg": "^8.21.0",
+    "sharp": "^0.34.5",
+    "string-similarity": "^4.0.4",
     "uuid": "^14.0.0"
   },
   "devDependencies": {

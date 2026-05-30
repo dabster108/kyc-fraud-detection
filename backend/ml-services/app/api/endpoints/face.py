@@ -1,34 +1,41 @@
-"""Face extraction API endpoint for KYC document images.
+"""Face extraction and comparison API endpoints for KYC.
 
-Exposes a single multipart endpoint that detects the primary face in an
-uploaded ID image, stores its embedding, checks for duplicates and returns a
-:class:`FaceExtractionResult`.
+Exposes:
+- POST /face/extract     — detect + embed + persist a face from an ID image
+- POST /face/compare     — compare a selfie against a stored document embedding
+- GET  /face/latest      — most recent face embedding with OCR data
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
+import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.core.config import settings
+from app.database import supabase_client
 from app.database.supabase_client import supabase
 from app.models.face_models import FaceExtractionResult
 from app.services import face_extractor
-from app.services.face_extractor import is_ready as models_ready
+from app.services.face_extractor import _detect, _to_vector_literal, is_ready as models_ready
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/face", tags=["Face"])
 
-# Allowed image content types for multipart uploads.
 _ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/jpg",
     "image/png",
     "image/webp",
 }
+
+
+def _max_upload_bytes() -> int:
+    return settings.MAX_UPLOAD_MB * 1024 * 1024
 
 
 def _max_upload_bytes() -> int:
@@ -100,6 +107,141 @@ async def extract(
         )
 
     return result
+
+
+@router.post("/compare")
+async def compare_faces(
+    selfie_image: UploadFile = File(..., description="Selfie image to compare."),
+    submission_id: str = Form(..., description="kyc_submission_id from Step 2 face/extract."),
+) -> Dict[str, Any]:
+    """Compare a live selfie against the stored document face embedding.
+
+    Extracts a 512-d InsightFace embedding from the selfie, then queries
+    pgvector for the cosine similarity against the embedding stored under
+    ``submission_id`` (produced in Step 2 by ``/face/extract``).
+
+    Returns::
+
+        {
+            "face_found":       bool,
+            "similarity_score": float | null,   # 0-1, null if no face / no stored emb
+            "is_match":         bool,
+            "threshold":        float,
+            "error":            str | null
+        }
+    """
+    if not models_ready():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Face models are still loading. Please retry in a few seconds.",
+            headers={"Retry-After": "5"},
+        )
+
+    content_type = (selfie_image.content_type or "").lower()
+    if content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Supported: jpeg, png, webp.",
+        )
+
+    image_bytes = await selfie_image.read()
+    if not image_bytes or len(image_bytes) > _max_upload_bytes():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty or oversized image.",
+        )
+
+    threshold = settings.DUPLICATE_SIMILARITY_THRESHOLD  # default 0.6
+
+    # ── 1. Extract selfie embedding ──────────────────────────────────────────
+    loop = asyncio.get_event_loop()
+    try:
+        faces, _ = await loop.run_in_executor(None, _detect, image_bytes)
+    except Exception as exc:
+        return {
+            "face_found": False,
+            "similarity_score": None,
+            "is_match": False,
+            "threshold": threshold,
+            "error": f"Face detection failed: {exc}",
+        }
+
+    if not faces:
+        return {
+            "face_found": False,
+            "similarity_score": None,
+            "is_match": False,
+            "threshold": threshold,
+            "error": "No face detected in selfie.",
+        }
+
+    best_face = max(faces, key=lambda f: float(f.det_score))
+    selfie_embedding = np.asarray(best_face.embedding, dtype=np.float32)
+    vector_literal = _to_vector_literal(selfie_embedding)
+
+    # ── 2. Look up stored document embedding and compute similarity ──────────
+    query = """
+        SELECT 1 - (embedding <=> $1::vector) AS similarity
+        FROM   face_embeddings
+        WHERE  submission_id = $2
+        ORDER  BY created_at DESC
+        LIMIT  1
+    """
+
+    similarity: Optional[float] = None
+
+    try:
+        pool = await supabase_client.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, vector_literal, submission_id)
+        if row is not None:
+            similarity = round(float(row["similarity"]), 4)
+    except Exception as exc:
+        logger.warning("DB pool failed for face compare; trying Supabase RPC: %s", exc)
+        # Fallback: fetch raw embedding via Supabase REST and compute in numpy
+        try:
+            client = supabase_client.supabase
+            if client is not None:
+                resp = (
+                    client.table("face_embeddings")
+                    .select("embedding")
+                    .eq("submission_id", submission_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if resp.data:
+                    raw = resp.data[0]["embedding"]
+                    # pgvector returns "[v1,v2,...]" string via REST
+                    if isinstance(raw, str):
+                        doc_vec = np.array(
+                            [float(x) for x in raw.strip("[]").split(",")],
+                            dtype=np.float32,
+                        )
+                    else:
+                        doc_vec = np.array(raw, dtype=np.float32)
+                    dot = float(np.dot(selfie_embedding, doc_vec))
+                    norm = float(np.linalg.norm(selfie_embedding) * np.linalg.norm(doc_vec))
+                    similarity = round(dot / norm if norm > 0 else 0.0, 4)
+        except Exception as fb_exc:
+            logger.exception("Face compare fallback also failed: %s", fb_exc)
+
+    if similarity is None:
+        return {
+            "face_found": True,
+            "similarity_score": None,
+            "is_match": False,
+            "threshold": threshold,
+            "error": f"No stored embedding found for submission_id={submission_id}",
+        }
+
+    return {
+        "face_found": True,
+        "similarity_score": similarity,
+        "is_match": similarity >= threshold,
+        "threshold": threshold,
+        "error": None,
+    }
 
 
 @router.get("/latest")

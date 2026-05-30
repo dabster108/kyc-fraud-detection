@@ -1,4 +1,4 @@
-import { MailIcon, UserIcon } from "../icons";
+import { MailIcon, PhoneIcon, UserIcon } from "../icons";
 
 const DISTRICTS_BY_PROVINCE = {
   Koshi: [
@@ -94,6 +94,15 @@ const DISTRICTS_BY_PROVINCE = {
   ],
 };
 
+const NATIONALITY_OPTIONS = [
+  "Nepali",
+  "Indian",
+  "Bhutanese",
+  "Bangladeshi",
+  "Chinese",
+  "Other",
+];
+
 export default function PersonalInfoStep({
   formData,
   formErrors,
@@ -140,15 +149,20 @@ export default function PersonalInfoStep({
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
-                Nationality
+                Nationality <span className="text-[#E11D48]">*</span>
               </label>
-              <input
-                type="text"
-                placeholder="Nepali"
+              <select
                 value={formData.nationality}
                 onChange={onChange("nationality")}
                 className={fieldClass(formErrors.nationality)}
-              />
+              >
+                <option value="">Select nationality</option>
+                {NATIONALITY_OPTIONS.map((nationality) => (
+                  <option key={nationality} value={nationality}>
+                    {nationality}
+                  </option>
+                ))}
+              </select>
               {formErrors.nationality && (
                 <p className="text-xs font-medium text-[#E11D48]">
                   {formErrors.nationality}
@@ -175,7 +189,7 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
-                Date of Birth
+                Date of Birth <span className="text-[#E11D48]">*</span>
               </label>
               <input
                 ref={dobInputRef}
@@ -191,7 +205,7 @@ export default function PersonalInfoStep({
               )}
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#475569]">Gender</label>
+              <label className="text-sm font-medium text-[#475569]">Gender <span className="text-[#E11D48]">*</span></label>
               <select
                 value={formData.gender}
                 onChange={onChange("gender")}
@@ -262,11 +276,11 @@ export default function PersonalInfoStep({
               <>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-[#475569]">
-                    Father's / Husband's Name
+                    Father's / Husband's Name <span className="text-[#E11D48]">*</span>
                   </label>
                   <input
                     type="text"
-                    placeholder=""
+                    placeholder="e.g. Ram Bahadur Shrestha"
                     value={formData.fatherName}
                     onChange={onChange("fatherName")}
                     className={fieldClass(formErrors.fatherName)}
@@ -279,11 +293,11 @@ export default function PersonalInfoStep({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-[#475569]">
-                    Grandfather's / Father-in-law's Name
+                    Grandfather's / Father-in-law's Name <span className="text-[#E11D48]">*</span>
                   </label>
                   <input
                     type="text"
-                    placeholder=""
+                    placeholder="e.g. Hari Prasad Shrestha"
                     value={formData.grandfatherName}
                     onChange={onChange("grandfatherName")}
                     className={fieldClass(formErrors.grandfatherName)}
@@ -301,11 +315,11 @@ export default function PersonalInfoStep({
               <>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-[#475569]">
-                    Mother's / Wife's Name
+                    Mother's / Wife's Name <span className="text-[#E11D48]">*</span>
                   </label>
                   <input
                     type="text"
-                    placeholder=""
+                    placeholder="e.g. Sita Devi Karki"
                     value={formData.motherName}
                     onChange={onChange("motherName")}
                     className={fieldClass(formErrors.motherName)}
@@ -318,11 +332,11 @@ export default function PersonalInfoStep({
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-[#475569]">
-                    Grandmother's / Mother-in-law's Name
+                    Grandmother's / Mother-in-law's Name <span className="text-[#E11D48]">*</span>
                   </label>
                   <input
                     type="text"
-                    placeholder=""
+                    placeholder="e.g. Kamala Devi Karki"
                     value={formData.grandmotherName}
                     onChange={onChange("grandmotherName")}
                     className={fieldClass(formErrors.grandmotherName)}
@@ -430,11 +444,11 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
-                Municipality / VDC
+                Municipality / VDC <span className="text-[#E11D48]">*</span>
               </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. Kathmandu Metropolitan City"
                 value={formData.currentMunicipality}
                 onChange={onChange("currentMunicipality")}
                 className={fieldClass(formErrors.currentMunicipality)}
@@ -446,10 +460,12 @@ export default function PersonalInfoStep({
               )}
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#475569]">Ward No.</label>
+              <label className="text-sm font-medium text-[#475569]">
+                Ward No. <span className="text-[#E11D48]">*</span>
+              </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. 10"
                 value={formData.currentWard}
                 onChange={onChange("currentWard")}
                 className={fieldClass(formErrors.currentWard)}
@@ -462,11 +478,11 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium text-[#475569]">
-                Street / Tole (optional)
+                Street / Tole <span className="text-[#94A3B8] font-normal">(optional)</span>
               </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. Putalisadak, Tole 3"
                 value={formData.currentStreet}
                 onChange={onChange("currentStreet")}
                 className={fieldClass(false)}
@@ -543,11 +559,11 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
-                Municipality / VDC
+                Municipality / VDC <span className="text-[#E11D48]">*</span>
               </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. Pokhara Metropolitan City"
                 value={formData.permanentMunicipality}
                 onChange={onChange("permanentMunicipality")}
                 disabled={formData.permanentSame}
@@ -560,10 +576,12 @@ export default function PersonalInfoStep({
               )}
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#475569]">Ward No.</label>
+              <label className="text-sm font-medium text-[#475569]">
+                Ward No. <span className="text-[#E11D48]">*</span>
+              </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. 5"
                 value={formData.permanentWard}
                 onChange={onChange("permanentWard")}
                 disabled={formData.permanentSame}
@@ -577,11 +595,11 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium text-[#475569]">
-                Street / Tole (optional)
+                Street / Tole <span className="text-[#94A3B8] font-normal">(optional)</span>
               </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. Lakeside, Ward 6"
                 value={formData.permanentStreet}
                 onChange={onChange("permanentStreet")}
                 disabled={formData.permanentSame}
@@ -592,17 +610,24 @@ export default function PersonalInfoStep({
         </section>
 
         <section className="space-y-6">
-          <div>
-            <p className="text-sm font-semibold text-[#0F172A]">Other Information</p>
-            <p className="text-xs text-[#64748B]">Optional metadata</p>
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0F172A] text-sm font-semibold text-white">
+              5
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-[#0F172A]">Contact & Occupation</p>
+              <p className="text-xs text-[#64748B]">Phone is required — email is optional</p>
+            </div>
           </div>
 
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-[#475569]">Occupation</label>
+              <label className="text-sm font-medium text-[#475569]">
+                Occupation <span className="text-[#E11D48]">*</span>
+              </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. Software Engineer, Farmer, Student"
                 value={formData.occupation}
                 onChange={onChange("occupation")}
                 className={fieldClass(formErrors.occupation)}
@@ -615,24 +640,42 @@ export default function PersonalInfoStep({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-[#475569]">
-                PAN Number (optional)
+                PAN Number <span className="text-[#94A3B8] font-normal">(optional)</span>
               </label>
               <input
                 type="text"
-                placeholder=""
+                placeholder="e.g. 123456789"
                 value={formData.panNumber}
                 onChange={onChange("panNumber")}
                 className={fieldClass(false)}
               />
             </div>
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-[#475569]">
+                <PhoneIcon className="h-4 w-4 text-[#94A3B8]" />
+                Phone Number
+              </label>
+              <input
+                type="tel"
+                placeholder="98XXXXXXXX"
+                value={formData.phone}
+                onChange={onChange("phone")}
+                className={fieldClass(formErrors.phone)}
+              />
+              {formErrors.phone && (
+                <p className="text-xs font-medium text-[#E11D48]">
+                  {formErrors.phone}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-[#475569]">
                 <MailIcon className="h-4 w-4 text-[#94A3B8]" />
-                Email Address (optional)
+                Email Address <span className="text-[#94A3B8] font-normal">(optional)</span>
               </label>
               <input
                 type="email"
-                placeholder=""
+                placeholder="your@email.com"
                 value={formData.email}
                 onChange={onChange("email")}
                 className={fieldClass(formErrors.email)}
