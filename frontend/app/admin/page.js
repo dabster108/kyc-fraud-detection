@@ -48,7 +48,7 @@ export default function AdminPanelPage() {
     } catch (err) {
       setLoadError(
         err.message ||
-          "Could not load submissions. Is the Express API running on port 5000?"
+          "Could not load submissions. Is the Express API running on port 3002?"
       );
       setSubmissions([]);
     } finally {
@@ -569,7 +569,7 @@ export default function AdminPanelPage() {
                 <div className="space-y-6 divide-y divide-[#F1F5F9]">
                   {[
                     { label: "Administrator Account", value: "admin", sub: "Username cannot be changed in demo mode." },
-                    { label: "KYC API Endpoint", value: "http://localhost:5000/api/v1", sub: "Express backend base URL." },
+                    { label: "KYC API Endpoint", value: "http://localhost:3002/api/v1", sub: "Express backend base URL." },
                     { label: "ML Services Endpoint", value: "http://localhost:8000/api/v1", sub: "FastAPI ML services base URL." },
                     { label: "Risk Threshold — High", value: "70", sub: "Submissions above this score are flagged as high risk." },
                     { label: "Duplicate Face Threshold", value: "0.6", sub: "Cosine similarity threshold for face duplicate detection." },

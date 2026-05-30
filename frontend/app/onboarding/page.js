@@ -437,10 +437,10 @@ export default function OnboardingPage() {
           fd.append("frontImage", docFile);
         }
 
-        const res = await fetch(
-          "http://localhost:5000/api/v1/onboarding/session/document",
-          { method: "POST", body: fd }
-        );
+        const res = await fetch("/api/v1/onboarding/session/document", {
+          method: "POST",
+          body: fd,
+        });
         const data = await res.json();
 
         if (!res.ok || !data.success) {
@@ -506,19 +506,16 @@ export default function OnboardingPage() {
       try {
         const submissionSpeedMs = Date.now() - pageLoadTimeRef.current;
         const sid = sessionId || "unknown";
-        const res = await fetch(
-          `http://localhost:5000/api/v1/onboarding/session/${sid}/personal-info`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...formData,
-              documentType,
-              deviceFingerprint: deviceFingerprint || null,
-              submissionSpeedMs,
-            }),
-          }
-        );
+        const res = await fetch(`/api/v1/onboarding/session/${sid}/personal-info`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...formData,
+            documentType,
+            deviceFingerprint: deviceFingerprint || null,
+            submissionSpeedMs,
+          }),
+        });
         const data = await res.json();
 
         if (!res.ok || !data.success) {

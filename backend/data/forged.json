@@ -1346,5 +1346,43 @@
       },
       "suspicious_region_count": 0
     }
+  },
+  {
+    "id": "1eaed14e-f0cf-4cdb-bb5b-20aa5c4a93df",
+    "timestamp": "2026-05-30T11:54:50.735557+00:00",
+    "service": "forgery",
+    "forgery_score": 13.739951113567479,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 128,
+    "details": {
+      "ela_score": 2.03,
+      "ela_mean_brightness": 1.73,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 2.79,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 2.7,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 9,
+        "suspicious_ratio": 0.009
+      },
+      "font_consistency_score": 15.7,
+      "font": {
+        "char_blobs": 9511,
+        "mean_char_height": 12.32,
+        "std_char_height": 7.45,
+        "height_cv": 0.6049
+      },
+      "suspicious_region_count": 0
+    }
   }
 ]
