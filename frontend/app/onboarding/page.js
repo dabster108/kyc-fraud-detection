@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import FingerprintJS from "@fingerprintjs/fingerprintjs";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from "../components/icons";
 import Stepper from "../components/Stepper";
 import TopNav from "../components/TopNav";
@@ -24,6 +25,10 @@ export default function OnboardingPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [docFile, setDocFile] = useState(null);
   const [docPreviewUrl, setDocPreviewUrl] = useState("");
+  const [docFrontFile, setDocFrontFile] = useState(null);
+  const [docBackFile, setDocBackFile] = useState(null);
+  const [docFrontPreviewUrl, setDocFrontPreviewUrl] = useState("");
+  const [docBackPreviewUrl, setDocBackPreviewUrl] = useState("");
   const [formData, setFormData] = useState({
     nationality: "",
     fullName: "",
@@ -48,7 +53,11 @@ export default function OnboardingPage() {
     permanentStreet: "",
     occupation: "",
     panNumber: "",
+    phone: "",
     email: "",
+    documentNumber: "",
+    documentIssuedDate: "",
+    documentIssuedPlace: "",
   });
   const [formErrors, setFormErrors] = useState({});
   const [cameraReady, setCameraReady] = useState(false);
@@ -61,10 +70,25 @@ export default function OnboardingPage() {
   });
   const [recordingStatus, setRecordingStatus] = useState("idle");
   const [faceVideoUrl, setFaceVideoUrl] = useState("");
+  const [sessionId, setSessionId] = useState(null);
+  const [riskFlags, setRiskFlags] = useState({});
+  const [ocrData, setOcrData] = useState(null);
+  const [forgeryDecision, setForgeryDecision] = useState(null);
+  const [forgeryScore, setForgeryScore] = useState(null);
+  const [forgeryDetails, setForgeryDetails] = useState(null);
+  const [documentUrl, setDocumentUrl] = useState(null);
+  const [documentFaceUrl, setDocumentFaceUrl] = useState(null);
+  const [selfieUrl, setSelfieUrl] = useState(null);
+  const [faceIsMatch, setFaceIsMatch] = useState(null);
+  const [deviceFingerprint, setDeviceFingerprint] = useState(null);
+  const pageLoadTimeRef = useRef(Date.now());
+  const [isStepLoading, setIsStepLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [isClient, setIsClient] = useState(false);
   const fileInputRef = useRef(null);
+  const fileFrontInputRef = useRef(null);
+  const fileBackInputRef = useRef(null);
   const dobInputRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -100,6 +124,14 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     setIsClient(true);
+    pageLoadTimeRef.current = Date.now();
+
+    // Load device fingerprint in the background — non-blocking
+    FingerprintJS.load()
+      .then((fp) => fp.get())
+      .then((result) => setDeviceFingerprint(result.visitorId))
+      .catch(() => {/* fingerprint unavailable — silent fail */});
+
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
@@ -161,6 +193,34 @@ export default function OnboardingPage() {
       URL.revokeObjectURL(previewUrl);
     };
   }, [docFile]);
+
+  useEffect(() => {
+    if (!docFrontFile) {
+      setDocFrontPreviewUrl("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(docFrontFile);
+    setDocFrontPreviewUrl(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [docFrontFile]);
+
+  useEffect(() => {
+    if (!docBackFile) {
+      setDocBackPreviewUrl("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(docBackFile);
+    setDocBackPreviewUrl(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [docBackFile]);
 
   const validateEmail = (value) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -247,6 +307,12 @@ export default function OnboardingPage() {
       errors.occupation = "Occupation is required.";
     }
 
+    if (!formData.phone.trim()) {
+      errors.phone = "Phone number is required.";
+    } else if (!/^[0-9]{7,15}$/.test(formData.phone.trim())) {
+      errors.phone = "Enter a valid phone number.";
+    }
+
     if (formData.email.trim() && !validateEmail(formData.email)) {
       errors.email = "Enter a valid email address.";
     }
@@ -258,7 +324,29 @@ export default function OnboardingPage() {
   const validateStepTwo = () => {
     const errors = {};
 
-    if (!docFile) {
+    if (!formData.documentNumber.trim()) {
+      errors.documentNumber =
+        documentType === "Citizenship"
+          ? "Citizenship number is required."
+          : "Document number is required.";
+    }
+
+    if (!formData.documentIssuedDate.trim()) {
+      errors.documentIssuedDate = "Issued date is required.";
+    }
+
+    if (!formData.documentIssuedPlace.trim()) {
+      errors.documentIssuedPlace = "Issued place is required.";
+    }
+
+    if (documentType === "Citizenship") {
+      if (!docFrontFile) {
+        errors.documentFront = "Please upload the front of your citizenship.";
+      }
+      if (!docBackFile) {
+        errors.documentBack = "Please upload the back of your citizenship.";
+      }
+    } else if (!docFile) {
       errors.document = "Please upload a document to continue.";
     }
 
@@ -299,18 +387,150 @@ export default function OnboardingPage() {
       return;
     }
 
+    if (step === 1) {
+      setIsStepLoading(true);
+      setSubmitError("");
+      try {
+        const submissionSpeedMs = Date.now() - pageLoadTimeRef.current;
+        const res = await fetch("http://localhost:5000/api/v1/onboarding/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...formData,
+            deviceFingerprint: deviceFingerprint || null,
+            submissionSpeedMs,
+          }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          setSubmitError(data.error || "Could not save your info. Please try again.");
+          setIsStepLoading(false);
+          return;
+        }
+
+        setSessionId(data.sessionId);
+        setRiskFlags(data.riskFlags || {});
+      } catch {
+        setSubmitError("Could not reach the server. Please check your connection.");
+        setIsStepLoading(false);
+        return;
+      }
+      setIsStepLoading(false);
+      setStep(2);
+      return;
+    }
+
     if (step === 2 && !validateStepTwo()) {
+      return;
+    }
+
+    if (step === 2) {
+      setIsStepLoading(true);
+      setSubmitError("");
+      try {
+        const fd = new FormData();
+        fd.append("documentType", documentType);
+        fd.append("documentNumber", formData.documentNumber.trim());
+        fd.append("documentIssuedDate", formData.documentIssuedDate.trim());
+        fd.append("documentIssuedPlace", formData.documentIssuedPlace.trim());
+
+        if (documentType === "Citizenship") {
+          if (docFrontFile) fd.append("frontImage", docFrontFile);
+          if (docBackFile) fd.append("backImage", docBackFile);
+        } else {
+          if (docFile) fd.append("frontImage", docFile);
+        }
+
+        const sid = sessionId || "unknown";
+        const res = await fetch(
+          `http://localhost:5000/api/v1/onboarding/session/${sid}/document`,
+          { method: "PUT", body: fd }
+        );
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          setSubmitError(data.error || "Could not process document. Please try again.");
+          setIsStepLoading(false);
+          return;
+        }
+
+        setOcrData(data.ocrData || null);
+        setForgeryDecision(data.forgeryDecision || null);
+        setForgeryScore(data.forgeryScore ?? null);
+        setForgeryDetails(data.forgeryDetails || null);
+        setDocumentUrl(data.documentUrl || null);
+        setDocumentFaceUrl(data.documentFaceUrl || null);
+        setRiskFlags(data.riskFlags || {});
+      } catch {
+        setSubmitError("Could not reach the server. Please check your connection.");
+        setIsStepLoading(false);
+        return;
+      }
+      setIsStepLoading(false);
+      setStep(3);
       return;
     }
 
     if (step === 3) {
       setSubmitError("");
+      setIsStepLoading(true);
       try {
-        const documentImage = docFile ? await fileToDataUrl(docFile) : "";
+        // ── Helper: convert a data URL to a File blob ───────────────────────
+        const dataUrlToBlob = (dataUrl, filename) => {
+          const [header, base64] = dataUrl.split(",");
+          const mime = header.match(/:(.*?);/)[1];
+          const binary = atob(base64);
+          const arr = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+          return new File([arr], filename, { type: mime });
+        };
+
+        // ── 1. Send selfies to backend ──────────────────────────────────────
+        let backendRiskScore = null;
+        let backendRiskFlags = {};
+
+        if (sessionId && faceCaptures.front) {
+          const fd = new FormData();
+          fd.append("selfie_front", dataUrlToBlob(faceCaptures.front, "selfie_front.jpg"));
+          if (faceCaptures.left) {
+            fd.append("selfie_left", dataUrlToBlob(faceCaptures.left, "selfie_left.jpg"));
+          }
+          if (faceCaptures.right) {
+            fd.append("selfie_right", dataUrlToBlob(faceCaptures.right, "selfie_right.jpg"));
+          }
+
+          const res = await fetch(
+            `http://localhost:5000/api/v1/onboarding/session/${sessionId}/selfie`,
+            { method: "PUT", body: fd }
+          );
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            backendRiskScore = data.riskScore;
+            backendRiskFlags = data.riskFlags || {};
+            setRiskFlags(backendRiskFlags);
+            if (data.selfieUrl) setSelfieUrl(data.selfieUrl);
+            if (data.isMatch !== undefined) setFaceIsMatch(data.isMatch);
+          }
+        }
+
+        // ── 2. Build localStorage submission for admin panel ────────────────
+        const documentImage =
+          documentType === "Citizenship"
+            ? docFrontFile ? await fileToDataUrl(docFrontFile) : ""
+            : docFile ? await fileToDataUrl(docFile) : "";
+        const documentBackImage =
+          documentType === "Citizenship" && docBackFile
+            ? await fileToDataUrl(docBackFile)
+            : "";
+
         const submission = {
           id: createSubmissionId(),
+          sessionId: sessionId || null,
           name: formData.fullName.trim(),
           email: formData.email.trim(),
+          phone: formData.phone.trim(),
           dob: formData.dob.trim(),
           gender: formData.gender.trim(),
           nationality: formData.nationality.trim(),
@@ -337,24 +557,43 @@ export default function OnboardingPage() {
           occupation: formData.occupation.trim(),
           panNumber: formData.panNumber.trim(),
           status: "Pending",
-          riskScore: 52,
+          riskScore: backendRiskScore ?? 52,
+          riskFlags: backendRiskFlags,
+          faceSimilarity: backendRiskFlags.face_similarity ?? null,
+          faceIsMatch: faceIsMatch,
           submittedAt: formatTimestamp(new Date()),
           channel: "Web",
           documentType,
-          documentNumber: `DOC-${Math.floor(Math.random() * 900000) + 100000}`,
-          documentFileName: docFile?.name || "",
+          documentNumber: formData.documentNumber.trim(),
+          documentIssuedDate: formData.documentIssuedDate.trim(),
+          documentIssuedPlace: formData.documentIssuedPlace.trim(),
+          documentFileName:
+            documentType === "Citizenship" ? docFrontFile?.name || "" : docFile?.name || "",
+          documentBackFileName:
+            documentType === "Citizenship" ? docBackFile?.name || "" : "",
           documentImage,
+          documentBackImage,
           faceCaptures,
           faceVideoUrl,
           address: formData.currentProvince.trim(),
+          // ML analysis data
+          ocrData: ocrData,
+          forgeryDecision: forgeryDecision,
+          forgeryScore: forgeryScore,
+          forgeryDetails: forgeryDetails,
+          documentUrl: documentUrl,
+          documentFaceUrl: documentFaceUrl,
+          selfieUrl: selfieUrl,
         };
         addSubmission(submission);
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
         }
         setCameraReady(false);
+        setIsStepLoading(false);
         setIsSubmitted(true);
       } catch (error) {
+        setIsStepLoading(false);
         setSubmitError("Unable to submit right now. Please try again.");
       }
       return;
@@ -370,6 +609,8 @@ export default function OnboardingPage() {
   };
 
   const canProceed = useMemo(() => {
+    if (isStepLoading) return false;
+
     if (step === 1) {
       return (
         formData.nationality.trim() &&
@@ -392,12 +633,23 @@ export default function OnboardingPage() {
             formData.permanentMunicipality.trim() &&
             formData.permanentWard.trim())) &&
         formData.occupation.trim() &&
+        formData.phone.trim() &&
+        /^[0-9]{7,15}$/.test(formData.phone.trim()) &&
         (!formData.email.trim() || validateEmail(formData.email))
       );
     }
 
     if (step === 2) {
-      return Boolean(docFile);
+      const hasDocumentUploads =
+        documentType === "Citizenship"
+          ? Boolean(docFrontFile) && Boolean(docBackFile)
+          : Boolean(docFile);
+      return (
+        formData.documentNumber.trim() &&
+        formData.documentIssuedDate.trim() &&
+        formData.documentIssuedPlace.trim() &&
+        hasDocumentUploads
+      );
     }
 
     if (step === 3) {
@@ -411,7 +663,14 @@ export default function OnboardingPage() {
     const value =
       event.target.type === "checkbox" ? event.target.checked : event.target.value;
     setFormData((current) => ({ ...current, [key]: value }));
-    setFormErrors((current) => ({ ...current, [key]: undefined }));
+    setFormErrors((current) => {
+      if (!(key in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -453,13 +712,36 @@ export default function OnboardingPage() {
     });
   }, [formData.familySide]);
 
-  const handleFileSelect = (files) => {
+  const clearDocumentError = (errorKey) => {
+    setFormErrors((current) => {
+      if (!(errorKey in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[errorKey];
+      return next;
+    });
+  };
+
+  const handleFileSelect = (files, target = "single") => {
     if (!files || files.length === 0) {
       return;
     }
     const [file] = files;
+    if (target === "front") {
+      setDocFrontFile(file);
+      clearDocumentError("documentFront");
+      return;
+    }
+
+    if (target === "back") {
+      setDocBackFile(file);
+      clearDocumentError("documentBack");
+      return;
+    }
+
     setDocFile(file);
-    setFormErrors((current) => ({ ...current, document: undefined }));
+    clearDocumentError("document");
   };
 
   const onDrop = (event) => {
@@ -481,6 +763,32 @@ export default function OnboardingPage() {
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
+  };
+
+  const openFrontFilePicker = () => {
+    if (fileFrontInputRef.current) {
+      fileFrontInputRef.current.click();
+    }
+  };
+
+  const openBackFilePicker = () => {
+    if (fileBackInputRef.current) {
+      fileBackInputRef.current.click();
+    }
+  };
+
+  const handleDocumentTypeChange = (type) => {
+    setDocumentType(type);
+    setDocFile(null);
+    setDocFrontFile(null);
+    setDocBackFile(null);
+    setFormErrors((current) => {
+      const next = { ...current };
+      delete next.document;
+      delete next.documentFront;
+      delete next.documentBack;
+      return next;
+    });
   };
 
   const stopRecording = () => {
@@ -631,10 +939,25 @@ export default function OnboardingPage() {
                     permanentStreet: "",
                     occupation: "",
                     panNumber: "",
+                    phone: "",
                     email: "",
+                    documentNumber: "",
+                    documentIssuedDate: "",
+                    documentIssuedPlace: "",
                   });
                   setDocFile(null);
+                  setDocFrontFile(null);
+                  setDocBackFile(null);
                   setFaceCaptures({ front: null, left: null, right: null });
+                  setOcrData(null);
+                  setForgeryDecision(null);
+                  setForgeryScore(null);
+                  setForgeryDetails(null);
+                  setDocumentUrl(null);
+                  setDocumentFaceUrl(null);
+                  setSelfieUrl(null);
+                  setFaceIsMatch(null);
+                  setRiskFlags({});
                 }}
                 className="rounded-full border border-[#E2E8F0] px-6 py-3 text-sm font-semibold text-[#64748B]"
               >
@@ -662,33 +985,110 @@ export default function OnboardingPage() {
                 <UploadDocumentStep
                   documentTypes={documentTypes}
                   documentType={documentType}
-                  onSelectType={setDocumentType}
+                  onSelectType={handleDocumentTypeChange}
+                  formData={formData}
+                  formErrors={formErrors}
+                  onFieldChange={handleInputChange}
                   isDragging={isDragging}
                   onOpenFilePicker={openFilePicker}
+                  onOpenFrontFilePicker={openFrontFilePicker}
+                  onOpenBackFilePicker={openBackFilePicker}
                   onDrop={onDrop}
                   onDragOver={onDragOver}
                   onDragLeave={onDragLeave}
                   fileInputRef={fileInputRef}
+                  fileFrontInputRef={fileFrontInputRef}
+                  fileBackInputRef={fileBackInputRef}
                   onFileChange={(event) => handleFileSelect(event.target.files)}
+                  onFrontFileChange={(event) =>
+                    handleFileSelect(event.target.files, "front")
+                  }
+                  onBackFileChange={(event) =>
+                    handleFileSelect(event.target.files, "back")
+                  }
                   docFile={docFile}
                   previewUrl={docPreviewUrl}
-                  error={formErrors.document}
+                  docFrontFile={docFrontFile}
+                  docBackFile={docBackFile}
+                  frontPreviewUrl={docFrontPreviewUrl}
+                  backPreviewUrl={docBackPreviewUrl}
                 />
               )}
 
               {step === 3 && (
-                <FaceVerificationStep
-                  cameraReady={cameraReady}
-                  cameraError={cameraError}
-                  videoRef={videoRef}
-                  onStartCamera={startCamera}
-                  captureSteps={captureSteps}
-                  currentCaptureIndex={currentCaptureIndex}
-                  onCapture={capturePhoto}
-                  onRetakeCapture={clearCapturesFrom}
-                  onUndoCapture={clearCapturesFrom}
-                  recordingStatus={recordingStatus}
-                />
+                <div className="space-y-6">
+                  {(ocrData || forgeryDecision) && (
+                    <div className="space-y-3">
+                      {forgeryDecision && forgeryDecision !== "genuine" && forgeryDecision !== "unknown" && (
+                        <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
+                          forgeryDecision === "forged"
+                            ? "border-red-200 bg-red-50"
+                            : "border-amber-200 bg-amber-50"
+                        }`}>
+                          <span className={`mt-0.5 text-base ${forgeryDecision === "forged" ? "text-red-500" : "text-amber-500"}`}>
+                            {forgeryDecision === "forged" ? "⚠" : "⚑"}
+                          </span>
+                          <div>
+                            <p className={`text-sm font-semibold ${forgeryDecision === "forged" ? "text-red-800" : "text-amber-800"}`}>
+                              {forgeryDecision === "forged"
+                                ? "Document authenticity concern detected"
+                                : "Document requires additional review"}
+                            </p>
+                            <p className={`mt-0.5 text-xs ${forgeryDecision === "forged" ? "text-red-600" : "text-amber-600"}`}>
+                              Our system flagged this document. Your application will be reviewed manually by our team.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {ocrData && (ocrData.name || ocrData.documentNumber) && (
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">
+                            Extracted from document
+                          </p>
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                            {ocrData.name && (
+                              <>
+                                <span className="text-xs text-[#64748B]">Name on document</span>
+                                <span className="text-xs font-medium text-[#0F172A]">{ocrData.name}</span>
+                              </>
+                            )}
+                            {ocrData.documentNumber && (
+                              <>
+                                <span className="text-xs text-[#64748B]">Document number</span>
+                                <span className="text-xs font-medium text-[#0F172A]">{ocrData.documentNumber}</span>
+                              </>
+                            )}
+                            {ocrData.documentType && (
+                              <>
+                                <span className="text-xs text-[#64748B]">Document type</span>
+                                <span className="text-xs font-medium text-[#0F172A] capitalize">{ocrData.documentType}</span>
+                              </>
+                            )}
+                          </div>
+                          {riskFlags.name_mismatch && (
+                            <p className="mt-2 text-xs text-amber-600">
+                              Name on document differs from the name you entered. Please ensure the details are correct.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <FaceVerificationStep
+                    cameraReady={cameraReady}
+                    cameraError={cameraError}
+                    videoRef={videoRef}
+                    onStartCamera={startCamera}
+                    captureSteps={captureSteps}
+                    currentCaptureIndex={currentCaptureIndex}
+                    onCapture={capturePhoto}
+                    onRetakeCapture={clearCapturesFrom}
+                    onUndoCapture={clearCapturesFrom}
+                    recordingStatus={recordingStatus}
+                  />
+                </div>
               )}
             </section>
 
@@ -698,10 +1098,70 @@ export default function OnboardingPage() {
               </p>
             ) : null}
 
-            {step === 1 && Object.keys(formErrors).length > 0 ? (
-              <p className="w-full max-w-4xl rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-                Please fill in all required fields highlighted in red.
-              </p>
+            {Object.keys(formErrors).length > 0 ? (() => {
+              const FIELD_LABELS = {
+                nationality: "Nationality",
+                fullName: "Full Name",
+                dob: "Date of Birth",
+                gender: "Gender",
+                familySide: "Family Side",
+                fatherName: "Father's / Husband's Name",
+                grandfatherName: "Grandfather's / Father-in-law's Name",
+                motherName: "Mother's / Wife's Name",
+                grandmotherName: "Grandmother's / Mother-in-law's Name",
+                maritalStatus: "Marital Status",
+                currentProvince: "Current Address — Province",
+                currentDistrict: "Current Address — District",
+                currentMunicipality: "Current Address — Municipality / VDC",
+                currentWard: "Current Address — Ward No.",
+                permanentProvince: "Permanent Address — Province",
+                permanentDistrict: "Permanent Address — District",
+                permanentMunicipality: "Permanent Address — Municipality / VDC",
+                permanentWard: "Permanent Address — Ward No.",
+                occupation: "Occupation",
+                phone: "Phone Number",
+                email: "Email Address",
+                documentNumber: "Document Number",
+                documentIssuedDate: "Issued Date",
+                documentIssuedPlace: "Issued Place",
+                document: "Document Upload",
+                documentFront: "Citizenship Front",
+                documentBack: "Citizenship Back",
+              };
+              const missingFields = Object.entries(formErrors)
+                .filter(([, msg]) => msg)
+                .map(([key, msg]) => ({ label: FIELD_LABELS[key] || key, msg }));
+              return (
+                <div className="w-full max-w-4xl rounded-xl border border-red-200 bg-red-50 px-5 py-4">
+                  <p className="text-sm font-semibold text-red-700">
+                    {missingFields.length === 1
+                      ? "1 field needs attention:"
+                      : `${missingFields.length} fields need attention:`}
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {missingFields.map(({ label, msg }) => (
+                      <li key={label} className="flex items-start gap-2 text-xs text-red-600">
+                        <span className="mt-0.5 text-red-400">•</span>
+                        <span><span className="font-semibold">{label}</span> — {msg}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })() : null}
+
+            {step === 2 && Object.keys(riskFlags).length > 0 ? (
+              <div className="w-full max-w-4xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-800">
+                  Heads up — we found some similarities with existing records.
+                </p>
+                <p className="mt-1 text-xs text-amber-700">
+                  Your application will go through additional review. This does not prevent you from continuing.
+                  {riskFlags.previous_email_attempts > 0
+                    ? ` We noticed ${riskFlags.previous_email_attempts} previous attempt(s) with this email.`
+                    : ""}
+                </p>
+              </div>
             ) : null}
 
             <div className="flex w-full max-w-4xl items-center justify-between">
@@ -727,8 +1187,20 @@ export default function OnboardingPage() {
                     : "cursor-not-allowed bg-[#9CA3AF]"
                 }`}
               >
-                {primaryAction.label}
-                {primaryAction.icon}
+                {isStepLoading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    Saving…
+                  </span>
+                ) : (
+                  <>
+                    {primaryAction.label}
+                    {primaryAction.icon}
+                  </>
+                )}
               </button>
             </div>
           </div>

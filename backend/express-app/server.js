@@ -25,10 +25,12 @@ app.use("/uploads", express.static("uploads"));
 // Import routes
 const kycRoutes = require("./src/routes/kycRoutes");
 const adminRoutes = require("./src/routes/adminRoutes");
+const onboardingRoutes = require("./src/routes/onboardingRoutes");
 
 // Routes
 app.use("/api/v1/kyc", kycRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/onboarding", onboardingRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
@@ -49,6 +51,7 @@ app.get("/", (req, res) => {
       health: "GET /health",
       kyc: "POST /api/v1/kyc/submit",
       admin: "GET /api/v1/admin/submissions/pending",
+      onboarding: "POST /api/v1/onboarding/session",
     },
   });
 });

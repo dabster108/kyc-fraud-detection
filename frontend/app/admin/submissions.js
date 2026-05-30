@@ -117,3 +117,12 @@ export const addSubmission = (submission) => {
 
 export const getSubmissionById = (id) =>
   readStoredSubmissions().find((item) => item.id === id);
+
+export const updateSubmissionStatus = (id, status) => {
+  const items = readStoredSubmissions();
+  const updated = items.map((item) =>
+    item.id === id ? { ...item, status } : item
+  );
+  writeStoredSubmissions(updated);
+  return updated;
+};

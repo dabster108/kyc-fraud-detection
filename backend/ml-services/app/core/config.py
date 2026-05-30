@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     PADDLE_OCR_LANG: str = "en"
     PADDLE_OCR_USE_GPU: bool = False
     MAX_UPLOAD_SIZE_MB: int = 10
-    FORGED_JSON_PATH: str = "/Users/dikshanta/Documents/kyc-fraud-detection/backend/ml-services/forged.json"
+    FORGED_JSON_PATH: str = str(Path(__file__).resolve().parents[3] / "data" / "forged.json")
 
     # Mistral OCR settings
     MISTRAL_API_KEY: str = ""

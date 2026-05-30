@@ -1,12 +1,22 @@
 """Forgery detection service using ELA and multiple CV/metadata checks.
 
 Weighted pipeline:
-1. ELA (Error Level Analysis)         30 %  — JPEG re-compression artifacts
-2. Edge Consistency                   15 %  — unnatural edge distribution
-3. Noise Pattern                      10 %  — pasted-region noise mismatch
-4. EXIF Metadata Anomaly              20 %  — editing-software / stripped metadata
-5. Copy-Move Detection                15 %  — ORB keypoint clone detection
-6. Font / Text Consistency            10 %  — glyph-size variance via connected comps
+1. ELA (Error Level Analysis)         47 %  — JPEG re-compression artifacts (most reliable)
+2. EXIF Metadata Anomaly              20 %  — editing-software / stripped metadata
+3. Edge Inconsistency                  5 %  — unnatural edge distribution (low-reliability for ID docs)
+4. Font / Text Consistency            10 %  — glyph-size variance via connected comps
+5. Noise Pattern                      10 %  — pasted-region noise mismatch
+6. Copy-Move Detection                 8 %  — ORB keypoint clone detection
+
+Calibration notes:
+- Edge inconsistency weight lowered (15% → 10%): citizenship/ID cards have naturally
+  high edge variance because they mix photo zones, text blocks, seals and borders.
+  Raw std-deviation of edge densities will always be large for legitimate documents.
+- Font consistency threshold raised (CV 0.30 → 0.55): ID documents intentionally use
+  different font sizes for field labels (small), values (medium) and titles (large).
+  The old threshold penalised this normal design pattern.
+- Copy-move weight lowered (15% → 8%): ORB keypoints create false positives on
+  documents with repetitive patterns (watermarks, decorative borders, seals).
 """
 
 from __future__ import annotations
@@ -167,6 +177,7 @@ def _check_copy_move(gray: np.ndarray) -> Tuple[float, Dict]:
 
         detail["suspicious_matches"] = suspicious
         ratio = suspicious / max(len(keypoints), 1)
+        detail["suspicious_ratio"] = round(ratio, 4)
         score = min(ratio * 300, 100.0)
         return score, detail
 
@@ -232,7 +243,9 @@ def _check_font_consistency(gray: np.ndarray) -> Tuple[float, Dict]:
         detail["height_cv"] = round(cv_h, 4)
 
         # CV below 0.30 → consistent (genuine), above 0.70 → very inconsistent
-        score = max(0.0, (cv_h - 0.30) / 0.40) * 100
+        # Threshold raised from 0.30 → 0.55: ID documents intentionally mix font sizes
+        # (small field labels, medium values, large title) so a CV of ~0.50 is normal.
+        score = max(0.0, (cv_h - 0.55) / 0.35) * 100
         return min(score, 100.0), detail
 
     except Exception as exc:
@@ -319,12 +332,16 @@ def _sync_analyze(image_bytes: bytes) -> Tuple[
     font_score, font_detail = _check_font_consistency(gray)
 
     # ── COMBINE: weighted composite ───────────────────────────────────────
+    # Weights: ELA 47% · EXIF 20% · Edge 5% · Font 10% · Noise 10% · CopyMove 8%
+    # Edge weight reduced 15% → 10% → 5%: ID cards always score 100 on this signal
+    # (photo + text + seal + border = naturally extreme edge variance). Not reliable alone.
+    # ELA receives the freed weight (42% → 47%): most trustworthy signal for JPEG edits.
     forgery_score = (
-        ela_score              * 0.30
-        + edge_inconsistency_score * 0.15
+        ela_score              * 0.47
+        + edge_inconsistency_score * 0.05
         + noise_score          * 0.10
         + exif_score           * 0.20
-        + copy_move_score      * 0.15
+        + copy_move_score      * 0.08
         + font_score           * 0.10
     )
 
