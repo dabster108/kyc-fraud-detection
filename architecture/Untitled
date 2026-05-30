@@ -1,0 +1,30 @@
+Create a system architecture diagram for a KYC Fraud Detection system called eKS (eSewa KYC Shield) with the following components and connections:
+
+Frontend layer:
+- Next.js 16 Frontend (React 19, Tailwind CSS, FingerprintJS)
+
+Orchestration layer:
+- Express.js Backend (Node.js) with three route groups: KYC Routes, Admin Routes, Onboarding Routes
+
+ML Services layer (FastAPI Python):
+- InsightFace buffalo_l Service (ArcFace 512-dim face embedding + RetinaFace detection)
+- Mistral OCR Service (pixtral-12b-2409 vision model, extracts structured fields)
+- Forgery Detector Service (6-check pipeline: ELA 47%, EXIF 20%, Font 10%, Noise 10%, Copy-Move 8%, Edge 5%)
+
+Database layer:
+- Supabase PostgreSQL with pgvector extension, tables: kyc_submissions, face_embeddings (vector 512), ocr_results, forgery_results, kyc_details
+
+Storage:
+- Cloudinary CDN (stores original ID images and cropped face images)
+
+Connections:
+- Next.js Frontend sends REST API calls to Express.js Backend
+- Express.js Backend calls FastAPI ML Services via HTTP
+- FastAPI ML Services read and write to Supabase PostgreSQL
+- FastAPI ML Services upload images to Cloudinary
+- Express.js Backend also reads from Supabase directly
+- InsightFace Service queries face_embeddings table using pgvector cosine similarity for duplicate detection
+- Mistral OCR Service writes extracted fields to ocr_results table
+- Forgery Detector writes composite score and per-check details to forgery_results table
+
+Show the flow direction with arrows. Group the ML services together in one box. Use a clean, professional layout with distinct color zones for each layer.
