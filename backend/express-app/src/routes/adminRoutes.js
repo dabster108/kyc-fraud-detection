@@ -3,6 +3,8 @@ const router = express.Router();
 const adminController = require("../controllers/adminController");
 
 // Admin routes
+router.get("/settings", adminController.getSettings);
+router.put("/settings", adminController.updateSettings);
 router.get("/submissions", adminController.getAllSubmissions);
 router.get("/submissions/pending", adminController.getPendingSubmissions);
 router.get("/submissions/:id", adminController.getSubmissionDetails);

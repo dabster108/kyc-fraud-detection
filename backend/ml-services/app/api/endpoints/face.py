@@ -45,6 +45,10 @@ async def extract(
     submission_id: Optional[str] = Form(
         default=None, description="Optional existing submission id."
     ),
+    similarity_threshold: Optional[float] = Form(
+        default=None,
+        description="Cosine similarity threshold for verified-face duplicate detection.",
+    ),
 ) -> FaceExtractionResult:
     """Detect and persist the primary face from an uploaded ID image.
 
@@ -81,7 +85,7 @@ async def extract(
 
     try:
         result = await face_extractor.extract_and_save_face(
-            image_bytes, submission_id
+            image_bytes, submission_id, similarity_threshold
         )
     except Exception as exc:  # noqa: BLE001 - safety net; service is resilient
         logger.exception("Face extraction endpoint failed")
@@ -108,6 +112,10 @@ async def extract(
 async def compare_faces(
     selfie_image: UploadFile = File(..., description="Selfie image to compare."),
     submission_id: str = Form(..., description="kyc_submission_id from Step 2 face/extract."),
+    match_threshold: Optional[float] = Form(
+        default=None,
+        description="Minimum cosine similarity to count as a face match.",
+    ),
 ) -> Dict[str, Any]:
     """Compare a live selfie against the stored document face embedding.
 
@@ -146,7 +154,11 @@ async def compare_faces(
             detail="Empty or oversized image.",
         )
 
-    threshold = settings.DUPLICATE_SIMILARITY_THRESHOLD  # default 0.6
+    threshold = (
+        match_threshold
+        if match_threshold is not None
+        else settings.FACE_MATCH_THRESHOLD
+    )
 
     # ── 1. Extract selfie embedding ──────────────────────────────────────────
     loop = asyncio.get_event_loop()

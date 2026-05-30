@@ -2,10 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchSubmissions } from "../../lib/adminApi";
+import {
+  fetchSubmissions,
+  fetchSettings,
+  updateSettings,
+} from "../../lib/adminApi";
 import AdminSidebar from "./AdminSidebar";
 
 const AUTH_KEY = "adminAuthed";
+
+const DEFAULT_SETTINGS = {
+  highRiskThreshold: 70,
+  duplicateFaceThreshold: 0.6,
+  faceMatchThreshold: 0.65,
+};
 
 const STATUS_COLORS = {
   Approved: "bg-emerald-100 text-emerald-700",
@@ -14,14 +24,14 @@ const STATUS_COLORS = {
   Rejected: "bg-red-100 text-red-700",
 };
 
-const RISK_COLOR = (score) => {
-  if (score >= 70) return "text-red-600 font-bold";
+const riskColor = (score, highRisk = 70) => {
+  if (score >= highRisk) return "text-red-600 font-bold";
   if (score >= 40) return "text-amber-600 font-semibold";
   return "text-emerald-600 font-semibold";
 };
 
-const RISK_BAR_COLOR = (score) => {
-  if (score >= 70) return "bg-red-500";
+const riskBarColor = (score, highRisk = 70) => {
+  if (score >= highRisk) return "bg-red-500";
   if (score >= 40) return "bg-amber-400";
   return "bg-emerald-500";
 };
@@ -38,6 +48,22 @@ export default function AdminPanelPage() {
   const [docFilter, setDocFilter] = useState("All");
   const [loadError, setLoadError] = useState("");
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [appSettings, setAppSettings] = useState({ ...DEFAULT_SETTINGS });
+  const [settingsDraft, setSettingsDraft] = useState({ ...DEFAULT_SETTINGS });
+  const [settingsMsg, setSettingsMsg] = useState("");
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  const highRiskThreshold = appSettings.highRiskThreshold ?? 70;
+
+  const loadSettings = async () => {
+    try {
+      const s = await fetchSettings();
+      setAppSettings(s);
+      setSettingsDraft(s);
+    } catch {
+      /* table may not exist yet — defaults apply */
+    }
+  };
 
   const loadSubmissions = async () => {
     setIsLoadingList(true);
@@ -62,6 +88,7 @@ export default function AdminPanelPage() {
     if (stored === "1") {
       setIsAuthed(true);
       loadSubmissions();
+      loadSettings();
     }
   }, []);
 
@@ -71,13 +98,15 @@ export default function AdminPanelPage() {
     const approved = submissions.filter((s) => s.status === "Approved").length;
     const flagged = submissions.filter((s) => s.status === "Flagged").length;
     const rejected = submissions.filter((s) => s.status === "Rejected").length;
-    const highRisk = submissions.filter((s) => s.riskScore >= 70).length;
+    const highRisk = submissions.filter(
+      (s) => s.riskScore >= highRiskThreshold
+    ).length;
     const avgRisk = total
       ? Math.round(submissions.reduce((sum, s) => sum + (s.riskScore || 0), 0) / total)
       : 0;
     const approvalRate = total ? Math.round((approved / total) * 100) : 0;
     return { total, pending, approved, flagged, rejected, highRisk, avgRisk, approvalRate };
-  }, [submissions]);
+  }, [submissions, highRiskThreshold]);
 
   const docTypeCounts = useMemo(() => {
     const counts = {};
@@ -110,9 +139,34 @@ export default function AdminPanelPage() {
   }, [submissions, search, statusFilter, docFilter]);
 
   const flaggedSubmissions = useMemo(
-    () => submissions.filter((s) => s.status === "Flagged" || s.riskScore >= 70),
-    [submissions]
+    () =>
+      submissions.filter(
+        (s) => s.status === "Flagged" || s.riskScore >= highRiskThreshold
+      ),
+    [submissions, highRiskThreshold]
   );
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsMsg("");
+    try {
+      const saved = await updateSettings({
+        highRiskThreshold: Number(settingsDraft.highRiskThreshold),
+        duplicateFaceThreshold: Number(settingsDraft.duplicateFaceThreshold),
+        faceMatchThreshold: Number(settingsDraft.faceMatchThreshold),
+      });
+      setAppSettings(saved);
+      setSettingsDraft(saved);
+      setSettingsMsg("Settings saved. New thresholds apply to the next KYC check.");
+      await loadSubmissions();
+    } catch (err) {
+      setSettingsMsg(err.message || "Could not save settings.");
+    } finally {
+      setIsSavingSettings(false);
+      setTimeout(() => setSettingsMsg(""), 4000);
+    }
+  };
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -121,6 +175,7 @@ export default function AdminPanelPage() {
       if (typeof window !== "undefined") window.sessionStorage.setItem(AUTH_KEY, "1");
       setAuthError("");
       loadSubmissions();
+      loadSettings();
     } else {
       setAuthError("Invalid credentials. Use admin / admin.");
     }
@@ -254,7 +309,7 @@ export default function AdminPanelPage() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 {[
                   { label: "Flagged", value: stats.flagged, sub: "Needs escalation", color: "text-amber-600", dot: "bg-amber-400" },
-                  { label: "High Risk (≥70)", value: stats.highRisk, sub: "Critical cases", color: "text-red-600", dot: "bg-red-500" },
+                  { label: `High Risk (≥${highRiskThreshold})`, value: stats.highRisk, sub: "Critical cases", color: "text-red-600", dot: "bg-red-500" },
                   { label: "Avg Risk Score", value: `${stats.avgRisk}`, sub: "Across all submissions", color: "text-[#0B1324]", dot: "bg-slate-400" },
                 ].map((card) => (
                   <div key={card.label} className="rounded-2xl bg-white p-5 shadow-sm">
@@ -323,7 +378,7 @@ export default function AdminPanelPage() {
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_COLORS[s.status] || "bg-gray-100 text-gray-600"}`}>
                         {s.status}
                       </span>
-                      <span className={`text-sm ${RISK_COLOR(s.riskScore)}`}>{s.riskScore}%</span>
+                      <span className={`text-sm ${riskColor(s.riskScore, highRiskThreshold)}`}>{s.riskScore}%</span>
                     </div>
                   ))}
                 </div>
@@ -431,11 +486,11 @@ export default function AdminPanelPage() {
                             <div className="flex items-center gap-2">
                               <div className="h-1.5 w-16 rounded-full bg-[#F1F5F9]">
                                 <div
-                                  className={`h-1.5 rounded-full ${RISK_BAR_COLOR(item.riskScore)}`}
+                                  className={`h-1.5 rounded-full ${riskBarColor(item.riskScore, highRiskThreshold)}`}
                                   style={{ width: `${item.riskScore}%` }}
                                 />
                               </div>
-                              <span className={`text-sm ${RISK_COLOR(item.riskScore)}`}>{item.riskScore}%</span>
+                              <span className={`text-sm ${riskColor(item.riskScore, highRiskThreshold)}`}>{item.riskScore}%</span>
                             </div>
                           </td>
                           <td className="px-5 py-4 text-xs text-[#64748B]">{item.submittedAt}</td>
@@ -533,7 +588,12 @@ export default function AdminPanelPage() {
                         submissions.filter((s) => s.riskScore >= j * 10 && s.riskScore < j * 10 + 10).length
                       ), 1);
                       const pct = (cnt / maxCnt) * 100;
-                      const barColor = hi <= 40 ? "bg-emerald-400" : hi <= 70 ? "bg-amber-400" : "bg-red-500";
+                      const barColor =
+                        hi <= 40
+                          ? "bg-emerald-400"
+                          : hi <= highRiskThreshold
+                            ? "bg-amber-400"
+                            : "bg-red-500";
                       return (
                         <div key={lo} className="flex flex-1 flex-col items-center gap-1">
                           <span className="text-[10px] font-semibold text-[#94A3B8]">{cnt}</span>
@@ -550,8 +610,8 @@ export default function AdminPanelPage() {
                   </div>
                   <div className="mt-3 flex gap-4 text-xs">
                     <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-emerald-400" /> Low (0–40)</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate (40–70)</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High (70–100)</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate (40–{highRiskThreshold})</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High ({highRiskThreshold}–100)</span>
                   </div>
                 </div>
               </div>
@@ -566,25 +626,80 @@ export default function AdminPanelPage() {
                 <p className="mt-1 text-sm text-[#64748B]">Admin panel configuration.</p>
               </div>
               <div className="rounded-2xl bg-white p-8 shadow-sm">
-                <div className="space-y-6 divide-y divide-[#F1F5F9]">
+                <form onSubmit={handleSaveSettings} className="space-y-6 divide-y divide-[#F1F5F9]">
+                  <div className="flex items-start justify-between gap-6 pt-0">
+                    <div>
+                      <p className="text-sm font-semibold text-[#0F172A]">Administrator Account</p>
+                      <p className="mt-0.5 text-xs text-[#94A3B8]">Demo login only (admin / admin).</p>
+                    </div>
+                    <span className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 font-mono text-sm">admin</span>
+                  </div>
+
                   {[
-                    { label: "Administrator Account", value: "admin", sub: "Username cannot be changed in demo mode." },
-                    { label: "KYC API Endpoint", value: "http://localhost:3002/api/v1", sub: "Express backend base URL." },
-                    { label: "ML Services Endpoint", value: "http://localhost:8000/api/v1", sub: "FastAPI ML services base URL." },
-                    { label: "Risk Threshold — High", value: "70", sub: "Submissions above this score are flagged as high risk." },
-                    { label: "Duplicate Face Threshold", value: "0.6", sub: "Cosine similarity threshold for face duplicate detection." },
+                    {
+                      key: "highRiskThreshold",
+                      label: "Risk Threshold — High",
+                      sub: "Submissions at or above this score are flagged as high risk in the admin panel.",
+                      step: "1",
+                      min: 1,
+                      max: 100,
+                    },
+                    {
+                      key: "duplicateFaceThreshold",
+                      label: "Duplicate Face Threshold",
+                      sub: "Cosine similarity for matching faces against verified users (document + embeddings).",
+                      step: "0.01",
+                      min: 0.1,
+                      max: 1,
+                    },
+                    {
+                      key: "faceMatchThreshold",
+                      label: "Selfie vs Document Match",
+                      sub: "Minimum similarity for live selfie to match the ID photo.",
+                      step: "0.01",
+                      min: 0.1,
+                      max: 1,
+                    },
                   ].map((row) => (
-                    <div key={row.label} className="flex items-start justify-between gap-6 pt-5 first:pt-0">
-                      <div>
+                    <div key={row.key} className="flex items-start justify-between gap-6 pt-5">
+                      <div className="flex-1">
                         <p className="text-sm font-semibold text-[#0F172A]">{row.label}</p>
                         <p className="mt-0.5 text-xs text-[#94A3B8]">{row.sub}</p>
                       </div>
-                      <span className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 font-mono text-sm text-[#0B1324]">
-                        {row.value}
-                      </span>
+                      <input
+                        type="number"
+                        step={row.step}
+                        min={row.min}
+                        max={row.max}
+                        value={settingsDraft[row.key] ?? ""}
+                        onChange={(e) =>
+                          setSettingsDraft((d) => ({
+                            ...d,
+                            [row.key]: e.target.value,
+                          }))
+                        }
+                        className="w-28 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-right font-mono text-sm text-[#0B1324] focus:border-[var(--brand)] focus:outline-none"
+                      />
                     </div>
                   ))}
-                </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-6">
+                    {settingsMsg ? (
+                      <p className="text-sm text-[#0F172A]">{settingsMsg}</p>
+                    ) : (
+                      <p className="text-xs text-[#94A3B8]">
+                        Stored in Supabase <code className="font-mono">app_settings</code>.
+                      </p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isSavingSettings}
+                      className="rounded-xl bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {isSavingSettings ? "Saving…" : "Save settings"}
+                    </button>
+                  </div>
+                </form>
                 <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <p className="text-sm font-semibold text-emerald-800">Data storage</p>
                   <p className="mt-1 text-xs text-emerald-700">

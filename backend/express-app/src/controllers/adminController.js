@@ -1,5 +1,13 @@
 const pool = require("../services/dbClient");
+const settingsService = require("../services/settingsService");
 const { mapOnboardingSession } = require("../utils/mapOnboardingSession");
+
+function mapOptionsFromSettings(s) {
+  return {
+    highRiskThreshold: s.high_risk_threshold,
+    faceMatchThreshold: s.face_match_threshold,
+  };
+}
 
 /**
  * GET /api/v1/admin/submissions
@@ -8,6 +16,8 @@ const { mapOnboardingSession } = require("../utils/mapOnboardingSession");
 exports.getAllSubmissions = async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+    const appSettings = await settingsService.getSettings();
+    const mapOpts = mapOptionsFromSettings(appSettings);
     const { rows } = await pool.query(
       `SELECT *
        FROM   onboarding_sessions
@@ -20,7 +30,8 @@ exports.getAllSubmissions = async (req, res) => {
     return res.json({
       success: true,
       count: rows.length,
-      submissions: rows.map(mapOnboardingSession).filter(Boolean),
+      submissions: rows.map((r) => mapOnboardingSession(r, mapOpts)).filter(Boolean),
+      settings: await settingsService.getApiSettings(),
     });
   } catch (error) {
     console.error("[admin] getAllSubmissions error:", error.message);
@@ -34,6 +45,8 @@ exports.getAllSubmissions = async (req, res) => {
  */
 exports.getPendingSubmissions = async (req, res) => {
   try {
+    const appSettings = await settingsService.getSettings();
+    const mapOpts = mapOptionsFromSettings(appSettings);
     const { rows } = await pool.query(
       `SELECT *
        FROM   onboarding_sessions
@@ -44,7 +57,7 @@ exports.getPendingSubmissions = async (req, res) => {
     return res.json({
       success: true,
       count: rows.length,
-      submissions: rows.map(mapOnboardingSession).filter(Boolean),
+      submissions: rows.map((r) => mapOnboardingSession(r, mapOpts)).filter(Boolean),
     });
   } catch (error) {
     console.error("[admin] getPendingSubmissions error:", error.message);
@@ -58,6 +71,8 @@ exports.getPendingSubmissions = async (req, res) => {
  */
 exports.getSubmissionDetails = async (req, res) => {
   try {
+    const appSettings = await settingsService.getSettings();
+    const mapOpts = mapOptionsFromSettings(appSettings);
     const { rows } = await pool.query(
       `SELECT * FROM onboarding_sessions WHERE id = $1`,
       [req.params.id]
@@ -67,7 +82,11 @@ exports.getSubmissionDetails = async (req, res) => {
       return res.status(404).json({ success: false, error: "Submission not found" });
     }
 
-    return res.json({ success: true, submission: mapOnboardingSession(rows[0]) });
+    return res.json({
+      success: true,
+      submission: mapOnboardingSession(rows[0], mapOpts),
+      settings: await settingsService.getApiSettings(),
+    });
   } catch (error) {
     console.error("[admin] getSubmissionDetails error:", error.message);
     return res.status(500).json({ error: error.message });
@@ -200,20 +219,73 @@ exports.rejectSubmission = async (req, res) => {
 /**
  * GET /api/v1/admin/metrics/dashboard
  */
+exports.getSettings = async (req, res) => {
+  try {
+    const settings = await settingsService.getApiSettings();
+    return res.json({ success: true, settings });
+  } catch (error) {
+    console.error("[admin] getSettings error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateSettings = async (req, res) => {
+  try {
+    const { highRiskThreshold, duplicateFaceThreshold, faceMatchThreshold } =
+      req.body || {};
+
+    if (highRiskThreshold != null) {
+      const n = Number(highRiskThreshold);
+      if (!Number.isFinite(n) || n < 1 || n > 100) {
+        return res.status(400).json({
+          success: false,
+          error: "highRiskThreshold must be between 1 and 100",
+        });
+      }
+    }
+    for (const val of [duplicateFaceThreshold, faceMatchThreshold]) {
+      if (val != null) {
+        const f = Number(val);
+        if (!Number.isFinite(f) || f < 0.1 || f > 1) {
+          return res.status(400).json({
+            success: false,
+            error: "Face thresholds must be between 0.1 and 1.0",
+          });
+        }
+      }
+    }
+
+    const updated = await settingsService.updateSettings(req.body);
+    return res.json({
+      success: true,
+      settings: {
+        highRiskThreshold: updated.high_risk_threshold,
+        duplicateFaceThreshold: updated.duplicate_face_threshold,
+        faceMatchThreshold: updated.face_match_threshold,
+      },
+    });
+  } catch (error) {
+    console.error("[admin] updateSettings error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 exports.getDashboardMetrics = async (req, res) => {
   try {
+    const { high_risk_threshold: highRisk } = await settingsService.getSettings();
     const { rows } = await pool.query(
       `SELECT
          COUNT(*)                                                 AS total_submissions,
          COUNT(*) FILTER (WHERE status = 'submitted')            AS pending_reviews,
          COUNT(*) FILTER (WHERE status = 'approved')             AS approved,
          COUNT(*) FILTER (WHERE status = 'rejected')             AS rejected,
-         COUNT(*) FILTER (WHERE risk_score >= 70)                AS high_risk,
+         COUNT(*) FILTER (WHERE risk_score >= $1)                AS high_risk,
          ROUND(AVG(risk_score)::numeric, 1)                      AS avg_risk_score,
          COUNT(*) FILTER (WHERE risk_flags ? 'forgery_detected') AS forgery_flagged,
          COUNT(*) FILTER (WHERE risk_flags ? 'face_mismatch')    AS face_mismatch,
          COUNT(*) FILTER (WHERE risk_flags ? 'bot_speed_suspected') AS bot_suspected
-       FROM onboarding_sessions`
+       FROM onboarding_sessions`,
+      [highRisk]
     );
 
     const m = rows[0];

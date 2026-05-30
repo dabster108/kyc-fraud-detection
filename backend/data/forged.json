@@ -1384,5 +1384,81 @@
       },
       "suspicious_region_count": 0
     }
+  },
+  {
+    "id": "850aca0b-1fcb-49fb-88d9-c26d7dbe92e3",
+    "timestamp": "2026-05-30T12:24:41.148773+00:00",
+    "service": "forgery",
+    "forgery_score": 20.07211176133352,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 494,
+    "details": {
+      "ela_score": 3.88,
+      "ela_mean_brightness": 3.3,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 3.29,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 40.2,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 134,
+        "suspicious_ratio": 0.134
+      },
+      "font_consistency_score": 40.32,
+      "font": {
+        "char_blobs": 465,
+        "mean_char_height": 15.23,
+        "std_char_height": 10.53,
+        "height_cv": 0.6911
+      },
+      "suspicious_region_count": 0
+    }
+  },
+  {
+    "id": "7cc0c59f-ae2e-4fa5-9258-957e33719da0",
+    "timestamp": "2026-05-30T12:25:13.913083+00:00",
+    "service": "forgery",
+    "forgery_score": 14.230602905094742,
+    "decision": "genuine",
+    "suspicious_regions": [],
+    "edge_consistency_score": 100.0,
+    "noise_score": 0.0,
+    "processing_time_ms": 133,
+    "details": {
+      "ela_score": 6.06,
+      "ela_mean_brightness": 5.15,
+      "edge_inconsistency_score": 100.0,
+      "noise_score": 0.0,
+      "noise_std": 4.39,
+      "exif_anomaly_score": 30.0,
+      "exif": {
+        "exif_tag_count": 0,
+        "image_format": "JPEG",
+        "exif_stripped": true
+      },
+      "copy_move_score": 4.8,
+      "copy_move": {
+        "keypoints_found": 1000,
+        "suspicious_matches": 16,
+        "suspicious_ratio": 0.016
+      },
+      "font_consistency_score": 0.0,
+      "font": {
+        "char_blobs": 2287,
+        "mean_char_height": 12.48,
+        "std_char_height": 5.78,
+        "height_cv": 0.4634
+      },
+      "suspicious_region_count": 0
+    }
   }
 ]

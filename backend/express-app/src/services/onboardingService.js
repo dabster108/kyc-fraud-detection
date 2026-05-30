@@ -1,4 +1,5 @@
 const pool = require("./dbClient");
+const settingsService = require("./settingsService");
 const { uploadBuffer } = require("./cloudinaryService");
 const { compareTwoStrings } = require("string-similarity");
 const FormData = require("form-data");
@@ -356,9 +357,12 @@ class OnboardingService {
   /**
    * Send a single image buffer to FastAPI as multipart form-data.
    */
-  async _callMLWithBuffer(endpoint, buffer, filename = "document.jpg") {
+  async _callMLWithBuffer(endpoint, buffer, filename = "document.jpg", extraFields = {}) {
     const form = new FormData();
     form.append("image", buffer, { filename, contentType: "image/jpeg" });
+    for (const [key, val] of Object.entries(extraFields)) {
+      if (val != null) form.append(key, String(val));
+    }
     const response = await axios.post(`${ML_URL}${endpoint}`, form, {
       headers: form.getHeaders(),
       timeout: ML_TIMEOUT,
@@ -528,10 +532,14 @@ class OnboardingService {
         ? this._callDualML("/api/v1/ocr/extract-citizenship", frontBuffer, backBuffer)
         : this._callMLWithBuffer("/api/v1/ocr/extract", frontBuffer, "front.jpg");
 
+    const appSettings = await settingsService.getSettings();
+
     const [forgeryOutcome, ocrOutcome, faceExtractOutcome] = await Promise.allSettled([
       this._callMLWithBuffer("/api/v1/forgery/verify", frontBuffer, "front.jpg"),
       ocrPromise,
-      this._callMLWithBuffer("/api/v1/face/extract", frontBuffer, "front.jpg"),
+      this._callMLWithBuffer("/api/v1/face/extract", frontBuffer, "front.jpg", {
+        similarity_threshold: appSettings.duplicate_face_threshold,
+      }),
     ]);
 
     if (forgeryOutcome.status === "fulfilled") {
@@ -730,10 +738,16 @@ class OnboardingService {
    * Call FastAPI /face/compare with a selfie buffer + stored document submission_id.
    * Returns { similarity_score, is_match, face_found } or null on service failure.
    */
-  async _compareFaceToDocument(selfieBuffer, kycSubmissionId, filename = "selfie.jpg") {
+  async _compareFaceToDocument(
+    selfieBuffer,
+    kycSubmissionId,
+    filename = "selfie.jpg",
+    matchThreshold = 0.65
+  ) {
     const form = new FormData();
     form.append("selfie_image", selfieBuffer, { filename, contentType: "image/jpeg" });
     form.append("submission_id", kycSubmissionId);
+    form.append("match_threshold", String(matchThreshold));
     try {
       const response = await axios.post(`${ML_URL}/api/v1/face/compare`, form, {
         headers: form.getHeaders(),
@@ -784,11 +798,16 @@ class OnboardingService {
     let faceSimilarity = null;
     let faceFound = false;
 
+    const appSettings = await settingsService.getSettings();
+    const matchThreshold = appSettings.face_match_threshold;
+    const uncertainThreshold = Math.max(matchThreshold - 0.15, 0.35);
+
     if (kycSubmissionId) {
       const compareResult = await this._compareFaceToDocument(
         frontBuffer,
         kycSubmissionId,
-        "selfie_front.jpg"
+        "selfie_front.jpg",
+        matchThreshold
       );
       if (compareResult) {
         faceSimilarity = compareResult.similarity_score ?? null;
@@ -805,14 +824,13 @@ class OnboardingService {
     if (faceSimilarity !== null) {
       addedFlags.face_similarity = faceSimilarity;
 
-      if (faceSimilarity < 0.50) {
+      if (faceSimilarity < uncertainThreshold) {
         addedFlags.face_mismatch = true;
         addedScore += 50;
-      } else if (faceSimilarity < 0.65) {
+      } else if (faceSimilarity < matchThreshold) {
         addedFlags.face_uncertain = true;
         addedScore += 20;
       }
-      // similarity >= 0.65 is a good match — no extra risk
     } else if (!kycSubmissionId) {
       addedFlags.face_comparison_skipped = true;
     } else if (!faceFound) {
@@ -822,7 +840,7 @@ class OnboardingService {
 
     // Liveness bonus: all 3 angles captured → slight risk reduction
     const hasAllAngles = Boolean(frontBuffer) && Boolean(leftBuffer) && Boolean(rightBuffer);
-    if (hasAllAngles && faceSimilarity !== null && faceSimilarity >= 0.50) {
+    if (hasAllAngles && faceSimilarity !== null && faceSimilarity >= uncertainThreshold) {
       addedScore -= 5; // liveness confirmed
       addedFlags.liveness_confirmed = true;
     }
@@ -855,7 +873,7 @@ class OnboardingService {
     return {
       selfieUrl,
       faceSimilarity,
-      isMatch: faceSimilarity !== null ? faceSimilarity >= 0.65 : null,
+      isMatch: faceSimilarity !== null ? faceSimilarity >= matchThreshold : null,
       riskFlags: mergedRiskFlags,
       riskScore: newRiskScore,
     };

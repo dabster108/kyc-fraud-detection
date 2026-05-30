@@ -13,12 +13,21 @@ import {
 } from "../../components/icons";
 import {
   fetchSubmissionById,
+  fetchSettings,
   approveSubmission,
   rejectSubmission,
 } from "../../../lib/adminApi";
 import AdminSidebar from "../AdminSidebar";
 
 const AUTH_KEY = "adminAuthed";
+
+function selfieByAngle(submission) {
+  return {
+    front: submission?.faceCaptures?.front || submission?.selfieUrl || null,
+    left: submission?.faceCaptures?.left || submission?.selfieLeftUrl || null,
+    right: submission?.faceCaptures?.right || submission?.selfieRightUrl || null,
+  };
+}
 
 // ─── Risk flag metadata ──────────────────────────────────────────────────────
 const FLAG_META = {
@@ -76,11 +85,15 @@ const STATUS_COLORS = {
   Rejected: "bg-red-100 text-red-700 border-red-200",
 };
 
-const getRiskTone = (score) => {
-  if (score >= 70) return { label: "High Risk",      pill: "bg-red-100 text-red-700",       color: "#EF4444", track: "#FEE2E2" };
-  if (score >= 40) return { label: "Moderate Risk",  pill: "bg-amber-100 text-amber-700",   color: "#F59E0B", track: "#FEF3C7" };
-  return              { label: "Low Risk",       pill: "bg-emerald-100 text-emerald-700", color: "#22C55E", track: "#DCFCE7" };
-};
+const getRiskTone = (score, highRisk = 70, faceMatch = 0.65) => ({
+  highRisk,
+  faceMatch,
+  ...(score >= highRisk
+    ? { label: "High Risk", pill: "bg-red-100 text-red-700", color: "#EF4444", track: "#FEE2E2" }
+    : score >= 40
+      ? { label: "Moderate Risk", pill: "bg-amber-100 text-amber-700", color: "#F59E0B", track: "#FEF3C7" }
+      : { label: "Low Risk", pill: "bg-emerald-100 text-emerald-700", color: "#22C55E", track: "#DCFCE7" }),
+});
 
 function InfoRow({ label, value }) {
   if (!value && value !== 0) return null;
@@ -140,6 +153,10 @@ export default function SubmissionDetailPage() {
   const [submission, setSubmission] = useState(null);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [appSettings, setAppSettings] = useState({
+    highRiskThreshold: 70,
+    faceMatchThreshold: 0.65,
+  });
   const [actionMsg, setActionMsg] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -148,9 +165,13 @@ export default function SubmissionDetailPage() {
     let cancelled = false;
     (async () => {
       try {
-        const row = await fetchSubmissionById(submissionId);
+        const [row, settings] = await Promise.all([
+          fetchSubmissionById(submissionId),
+          fetchSettings().catch(() => null),
+        ]);
         if (!cancelled) {
           setSubmission(row);
+          if (settings) setAppSettings(settings);
           setLoadError("");
         }
       } catch (err) {
@@ -167,7 +188,17 @@ export default function SubmissionDetailPage() {
     };
   }, [submissionId]);
 
-  const risk = useMemo(() => getRiskTone(submission?.riskScore || 0), [submission]);
+  const risk = useMemo(
+    () =>
+      getRiskTone(
+        submission?.riskScore || 0,
+        appSettings.highRiskThreshold,
+        appSettings.faceMatchThreshold
+      ),
+    [submission, appSettings]
+  );
+
+  const selfies = useMemo(() => selfieByAngle(submission), [submission]);
 
   const handleLogout = () => {
     if (typeof window !== "undefined") window.sessionStorage.removeItem(AUTH_KEY);
@@ -437,13 +468,13 @@ export default function SubmissionDetailPage() {
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-[#64748B]">Similarity Score</span>
-                        <span className={`text-2xl font-bold ${submission.faceSimilarity >= 0.65 ? "text-emerald-600" : submission.faceSimilarity >= 0.5 ? "text-amber-600" : "text-red-600"}`}>
+                        <span className={`text-2xl font-bold ${submission.faceSimilarity >= risk.faceMatch ? "text-emerald-600" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "text-amber-600" : "text-red-600"}`}>
                           {(submission.faceSimilarity * 100).toFixed(1)}%
                         </span>
                       </div>
                       <div className="h-3 rounded-full bg-[#F1F5F9]">
                         <div
-                          className={`h-3 rounded-full transition-all ${submission.faceSimilarity >= 0.65 ? "bg-emerald-500" : submission.faceSimilarity >= 0.5 ? "bg-amber-400" : "bg-red-500"}`}
+                          className={`h-3 rounded-full transition-all ${submission.faceSimilarity >= risk.faceMatch ? "bg-emerald-500" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "bg-amber-400" : "bg-red-500"}`}
                           style={{ width: `${submission.faceSimilarity * 100}%` }}
                         />
                       </div>
@@ -864,8 +895,19 @@ export default function SubmissionDetailPage() {
                     {["front", "left", "right"].map((angle) => (
                       <div key={angle} className="flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2">
                         <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-lg bg-white">
-                          {submission.faceCaptures?.[angle] ? (
-                            <img src={submission.faceCaptures[angle]} alt={`${angle} selfie`} className="h-full w-full object-cover" />
+                          {selfies[angle] ? (
+                            <a
+                              href={selfies[angle]}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="h-full w-full"
+                            >
+                              <img
+                                src={selfies[angle]}
+                                alt={`${angle} selfie`}
+                                className="h-full w-full object-cover"
+                              />
+                            </a>
                           ) : (
                             <span className="text-[10px] text-[#CBD5E1]">—</span>
                           )}
@@ -874,11 +916,27 @@ export default function SubmissionDetailPage() {
                       </div>
                     ))}
                   </div>
-                  {submission.selfieUrl && (
-                    <a href={submission.selfieUrl} target="_blank" rel="noreferrer"
-                      className="mt-2 block text-xs font-semibold text-[var(--brand)] hover:underline">
-                      View uploaded selfie on Cloudinary ↗
-                    </a>
+                  {(selfies.front || selfies.left || selfies.right) && (
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      {selfies.front && (
+                        <a href={selfies.front} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Front on Cloudinary ↗
+                        </a>
+                      )}
+                      {selfies.left && (
+                        <a href={selfies.left} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Left on Cloudinary ↗
+                        </a>
+                      )}
+                      {selfies.right && (
+                        <a href={selfies.right} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Right on Cloudinary ↗
+                        </a>
+                      )}
+                    </div>
                   )}
                   {submission.faceVideoUrl && (
                     <div className="mt-3">
@@ -907,7 +965,7 @@ export default function SubmissionDetailPage() {
                       </div>
                       <div className="h-4 rounded-full bg-[#F1F5F9] relative">
                         <div
-                          className={`h-4 rounded-full transition-all ${submission.faceSimilarity >= 0.65 ? "bg-emerald-500" : submission.faceSimilarity >= 0.5 ? "bg-amber-400" : "bg-red-500"}`}
+                          className={`h-4 rounded-full transition-all ${submission.faceSimilarity >= risk.faceMatch ? "bg-emerald-500" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "bg-amber-400" : "bg-red-500"}`}
                           style={{ width: `${submission.faceSimilarity * 100}%` }}
                         />
                         {/* Threshold line at 65% */}
@@ -917,7 +975,7 @@ export default function SubmissionDetailPage() {
                       <div className="rounded-xl bg-[#F8FAFC] p-4 space-y-1 text-xs">
                         <p><span className="text-[#94A3B8]">Raw value: </span><span className="font-mono font-semibold text-[#0B1324]">{submission.faceSimilarity}</span></p>
                         <p><span className="text-[#94A3B8]">Algorithm: </span><span className="font-semibold text-[#0B1324]">InsightFace buffalo_l (ArcFace)</span></p>
-                        <p><span className="text-[#94A3B8]">Threshold: </span><span className="font-semibold text-[#0B1324]">0.65</span></p>
+                        <p><span className="text-[#94A3B8]">Threshold: </span><span className="font-semibold text-[#0B1324]">{risk.faceMatch}</span></p>
                         <p><span className="text-[#94A3B8]">Match: </span><span className={`font-semibold ${submission.faceIsMatch ? "text-emerald-600" : "text-red-600"}`}>{submission.faceIsMatch ? "Yes" : "No"}</span></p>
                       </div>
                     </div>
