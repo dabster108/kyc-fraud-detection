@@ -11,8 +11,14 @@ import {
   ShieldIcon,
   UserIcon,
 } from "../../components/icons";
-import { getSubmissionById, updateSubmissionStatus } from "../submissions";
+import {
+  fetchSubmissionById,
+  approveSubmission,
+  rejectSubmission,
+} from "../../../lib/adminApi";
 import AdminSidebar from "../AdminSidebar";
+
+const AUTH_KEY = "adminAuthed";
 
 // ─── Risk flag metadata ──────────────────────────────────────────────────────
 const FLAG_META = {
@@ -29,18 +35,17 @@ const FLAG_META = {
   document_number_mismatch:    { label: "Document Number Mismatch",      severity: "high",     desc: "OCR-read document number differs from what the applicant entered.", impact: "+25 pts" },
   ocr_document_number:         { label: "OCR Document Number",           severity: "info",     desc: "Document number as read directly from the document by OCR." },
   user_document_number:        { label: "Entered Document Number",       severity: "info",     desc: "Document number manually entered by the applicant." },
-  duplicate_document_number:   { label: "Duplicate Document",            severity: "critical", desc: "This document number was submitted in a previous KYC attempt.", impact: "+15 pts" },
-  previous_document_attempts:  { label: "Prior Document Uses",           severity: "info",     desc: "Number of times this document number has been used in past submissions." },
-  verified_user_document_exists: { label: "Verified Doc Exists",         severity: "critical", desc: "This document number already belongs to an approved verified user.", impact: "+50 pts" },
-  duplicate_email:             { label: "Duplicate Email",               severity: "high",     desc: "This email was used in one or more previous KYC submissions.", impact: "varies" },
-  previous_email_attempts:     { label: "Prior Email Attempts",          severity: "info",     desc: "Number of previous submissions using this email address." },
-  duplicate_phone:             { label: "Duplicate Phone",               severity: "high",     desc: "This phone number was used in a previous KYC attempt.", impact: "+10 pts" },
-  previous_phone_attempts:     { label: "Prior Phone Attempts",          severity: "info",     desc: "Number of previous submissions using this phone number." },
-  duplicate_pan:               { label: "Duplicate PAN",                 severity: "high",     desc: "PAN number has been submitted before.", impact: "+20 pts" },
-  verified_user_email_exists:  { label: "Verified Email Match",          severity: "critical", desc: "Email already belongs to an approved verified user.", impact: "+40 pts" },
+  verified_user_document_exists: { label: "Verified Citizen # Match",    severity: "critical", desc: "This citizenship/document number already belongs to an approved verified user.", impact: "+50 pts" },
+  previous_document_attempts:  { label: "Prior Document Uses",           severity: "info",     desc: "Prior onboarding attempts with this document number (risk count only)." },
+  onboarding_session_doc_count: { label: "Session Doc Reuse Count",      severity: "info",     desc: "Times this document number appears in onboarding_sessions." },
+  extract_unofficial_doc_count: { label: "OCR Archive Doc Count",      severity: "info",     desc: "Times this number appears in extract_unofficial OCR records." },
+  previous_email_attempts:     { label: "Prior Email Attempts",          severity: "info",     desc: "Number of previous onboarding sessions using this email." },
+  onboarding_session_email_count: { label: "Session Email Count",       severity: "info",     desc: "Email reuse count in onboarding_sessions." },
   verified_user_phone_exists:  { label: "Verified Phone Match",          severity: "critical", desc: "Phone number already belongs to an approved verified user.", impact: "+40 pts" },
-  verified_user_pan_exists:    { label: "Verified PAN Match",            severity: "critical", desc: "PAN already belongs to an approved verified user.", impact: "+40 pts" },
-  name_dob_match_verified:     { label: "Name+DOB Already Verified",     severity: "critical", desc: "This exact name and date-of-birth combination is already in the verified users table.", impact: "+30 pts" },
+  previous_phone_attempts:     { label: "Prior Phone Attempts",          severity: "info",     desc: "Prior onboarding sessions with this phone (risk count only)." },
+  onboarding_session_phone_count: { label: "Session Phone Count",       severity: "info",     desc: "Phone reuse count in onboarding_sessions." },
+  previous_pan_attempts:       { label: "Prior PAN Attempts",            severity: "info",     desc: "Prior onboarding sessions with this PAN." },
+  onboarding_session_pan_count: { label: "Session PAN Count",            severity: "info",     desc: "PAN reuse count in onboarding_sessions." },
   same_device_multiple_attempts: { label: "Multi-Attempt Device",        severity: "medium",   desc: "Multiple KYC submissions detected from the same device fingerprint." },
   device_attempt_count:        { label: "Device Attempt Count",          severity: "info",     desc: "Total previous KYC submissions from this specific device." },
   multiple_accounts_same_ip:   { label: "Multiple IP Accounts",          severity: "high",     desc: "Several distinct accounts submitted KYC from this IP within 24 hours.", impact: "+20 pts" },
@@ -52,8 +57,8 @@ const FLAG_META = {
   no_face_in_selfie:           { label: "No Face Detected in Selfie",    severity: "high",     desc: "The ML model could not detect a human face in the selfie images.", impact: "+20 pts" },
   verified_face_exists:        { label: "Verified Face Match",           severity: "critical", desc: "This face matches a face embedding belonging to an already-approved verified user.", impact: "+40 pts" },
   verified_face_similarity:    { label: "Verified Face Similarity",      severity: "info",     desc: "Cosine similarity score (0–1) between this face and the matched verified user's face." },
-  duplicate_face_pending:      { label: "Pending Face Duplicates",       severity: "high",     desc: "A similar face was found in one or more other unverified (pending) KYC submissions.", impact: "+15–30 pts" },
-  pending_face_attempt_count:  { label: "Pending Face Match Count",      severity: "info",     desc: "Number of pending (unverified) submissions with a face similar to this applicant." },
+  pending_face_attempt_count:  { label: "Pending Face Match Count",      severity: "info",     desc: "Similar unverified faces in other sessions (risk count only, not a verified duplicate)." },
+  onboarding_pending_face_count: { label: "Pending Face Session Count",  severity: "info",     desc: "Count of pending face embedding matches." },
 };
 
 const SEVERITY_STYLE = {
@@ -139,21 +144,42 @@ export default function SubmissionDetailPage() {
 
   useEffect(() => {
     if (!submissionId) return;
-    setSubmission(getSubmissionById(submissionId));
-    setHasLoaded(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const row = await fetchSubmissionById(submissionId);
+        if (!cancelled) setSubmission(row);
+      } catch {
+        if (!cancelled) setSubmission(null);
+      } finally {
+        if (!cancelled) setHasLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [submissionId]);
 
   const risk = useMemo(() => getRiskTone(submission?.riskScore || 0), [submission]);
 
   const handleLogout = () => {
-    if (typeof window !== "undefined") window.localStorage.removeItem("adminAuthed");
+    if (typeof window !== "undefined") window.sessionStorage.removeItem(AUTH_KEY);
     router.push("/admin");
   };
 
-  const handleAction = (newStatus) => {    if (!submissionId) return;
-    updateSubmissionStatus(submissionId, newStatus);
-    setSubmission((prev) => prev ? { ...prev, status: newStatus } : prev);
-    setActionMsg(`Marked as ${newStatus}`);
+  const handleAction = async (newStatus) => {
+    if (!submissionId) return;
+    try {
+      if (newStatus === "Approved") {
+        await approveSubmission(submissionId, { reviewedBy: "admin" });
+      } else if (newStatus === "Rejected") {
+        await rejectSubmission(submissionId, { reviewedBy: "admin", reason: "Rejected by admin" });
+      }
+      setSubmission((prev) => (prev ? { ...prev, status: newStatus } : prev));
+      setActionMsg(`Marked as ${newStatus}`);
+    } catch (err) {
+      setActionMsg(err.message || "Action failed");
+    }
     setTimeout(() => setActionMsg(""), 3000);
   };
 

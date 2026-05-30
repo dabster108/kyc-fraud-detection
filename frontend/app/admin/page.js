@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getStoredSubmissions } from "./submissions";
+import { fetchSubmissions } from "../../lib/adminApi";
 import AdminSidebar from "./AdminSidebar";
+
+const AUTH_KEY = "adminAuthed";
 
 const STATUS_COLORS = {
   Approved: "bg-emerald-100 text-emerald-700",
@@ -34,14 +36,27 @@ export default function AdminPanelPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [docFilter, setDocFilter] = useState("All");
+  const [loadError, setLoadError] = useState("");
+
+  const loadSubmissions = async () => {
+    try {
+      setLoadError("");
+      const rows = await fetchSubmissions();
+      setSubmissions(rows);
+    } catch (err) {
+      setLoadError(err.message || "Could not load submissions from server.");
+      setSubmissions([]);
+    }
+  };
 
   useEffect(() => {
-    const stored = typeof window !== "undefined" ? window.localStorage.getItem("adminAuthed") : null;
-    if (stored === "1") setIsAuthed(true);
-    setSubmissions(getStoredSubmissions());
+    const stored =
+      typeof window !== "undefined" ? window.sessionStorage.getItem(AUTH_KEY) : null;
+    if (stored === "1") {
+      setIsAuthed(true);
+      loadSubmissions();
+    }
   }, []);
-
-  const refreshSubmissions = () => setSubmissions(getStoredSubmissions());
 
   const stats = useMemo(() => {
     const total = submissions.length;
@@ -96,8 +111,9 @@ export default function AdminPanelPage() {
     e.preventDefault();
     if (credentials.username.trim() === "admin" && credentials.password.trim() === "admin") {
       setIsAuthed(true);
-      if (typeof window !== "undefined") window.localStorage.setItem("adminAuthed", "1");
+      if (typeof window !== "undefined") window.sessionStorage.setItem(AUTH_KEY, "1");
       setAuthError("");
+      loadSubmissions();
     } else {
       setAuthError("Invalid credentials. Use admin / admin.");
     }
@@ -105,7 +121,7 @@ export default function AdminPanelPage() {
 
   const handleLogout = () => {
     setIsAuthed(false);
-    if (typeof window !== "undefined") window.localStorage.removeItem("adminAuthed");
+    if (typeof window !== "undefined") window.sessionStorage.removeItem(AUTH_KEY);
   };
 
   if (!isAuthed) {
@@ -181,7 +197,7 @@ export default function AdminPanelPage() {
               ● Live
             </span>
             <button
-              onClick={() => { refreshSubmissions(); }}
+              onClick={() => loadSubmissions()}
               className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-xs font-semibold text-[#64748B] transition hover:border-[#CBD5E1] hover:text-[#0F172A]"
             >
               ↻ Refresh
@@ -190,6 +206,11 @@ export default function AdminPanelPage() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
+          {loadError ? (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {loadError}
+            </div>
+          ) : null}
           {/* ── OVERVIEW ── */}
           {activeTab === "overview" && (
             <div className="space-y-6">
@@ -552,9 +573,9 @@ export default function AdminPanelPage() {
                   ))}
                 </div>
                 <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-amber-800">Demo Mode</p>
-                  <p className="mt-1 text-xs text-amber-700">
-                    Submission data is stored in browser localStorage. Clear site data to reset all submissions to seed data.
+                  <p className="text-sm font-semibold text-emerald-800">Data storage</p>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Submissions load from Postgres (onboarding_sessions). Images on Cloudinary; embeddings in Supabase.
                   </p>
                 </div>
               </div>

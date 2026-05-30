@@ -9,7 +9,6 @@ import TopNav from "../components/TopNav";
 import FaceVerificationStep from "../components/steps/FaceVerificationStep";
 import PersonalInfoStep from "../components/steps/PersonalInfoStep";
 import UploadDocumentStep from "../components/steps/UploadDocumentStep";
-import { addSubmission } from "../admin/submissions";
 
 // Document-first flow: upload the ID first so OCR can pre-fill the review form.
 const steps = [
@@ -359,15 +358,7 @@ export default function OnboardingPage() {
     return `${datePart} ${timePart}`;
   };
 
-  const createSubmissionId = () => {
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const rand = Math.floor(Math.random() * 9000) + 1000;
-    return `KYC-${stamp}-${rand}`;
-  };
-
   const finalizeSubmission = async ({
-    captures,
-    backendRiskScore = null,
     backendRiskFlags = {},
     backendSelfieUrl = null,
     backendFaceIsMatch = null,
@@ -376,75 +367,17 @@ export default function OnboardingPage() {
     setSubmitError("");
     setIsStepLoading(true);
     try {
-      const activeCaptures = captures || faceCaptures;
-      const mergedRiskFlags = { ...riskFlags, ...backendRiskFlags };
+      if (backendRiskFlags && Object.keys(backendRiskFlags).length > 0) {
+        setRiskFlags((current) => ({ ...current, ...backendRiskFlags }));
+      }
+      if (backendSelfieUrl) setSelfieUrl(backendSelfieUrl);
+      if (backendFaceIsMatch !== undefined && backendFaceIsMatch !== null) {
+        setFaceIsMatch(backendFaceIsMatch);
+      }
       if (backendFaceSimilarity != null) {
-        mergedRiskFlags.face_similarity = backendFaceSimilarity;
+        setFaceSimilarityScore(backendFaceSimilarity);
       }
 
-      const submission = {
-        id: createSubmissionId(),
-        sessionId: sessionId || null,
-        name: formData.fullName.trim(),
-        email: formData.email.trim(),
-        phone: formData.phone.trim(),
-        dob: formData.dob.trim(),
-        gender: formData.gender.trim(),
-        nationality: formData.nationality.trim(),
-        familySide: formData.familySide.trim(),
-        fatherName: formData.fatherName.trim(),
-        grandfatherName: formData.grandfatherName.trim(),
-        motherName: formData.motherName.trim(),
-        grandmotherName: formData.grandmotherName.trim(),
-        maritalStatus: formData.maritalStatus.trim(),
-        currentAddress: {
-          province: formData.currentProvince.trim(),
-          district: formData.currentDistrict.trim(),
-          municipality: formData.currentMunicipality.trim(),
-          ward: formData.currentWard.trim(),
-          street: formData.currentStreet.trim(),
-        },
-        permanentAddress: {
-          province: formData.permanentProvince.trim(),
-          district: formData.permanentDistrict.trim(),
-          municipality: formData.permanentMunicipality.trim(),
-          ward: formData.permanentWard.trim(),
-          street: formData.permanentStreet.trim(),
-        },
-        occupation: formData.occupation.trim(),
-        panNumber: formData.panNumber.trim(),
-        status: "Pending",
-        riskScore: backendRiskScore ?? 52,
-        riskFlags: mergedRiskFlags,
-        faceSimilarity:
-          backendFaceSimilarity ?? mergedRiskFlags.face_similarity ?? null,
-        faceIsMatch: backendFaceIsMatch ?? faceIsMatch,
-        submittedAt: formatTimestamp(new Date()),
-        channel: "Web",
-        documentType,
-        documentNumber: formData.documentNumber.trim(),
-        documentIssuedDate: formData.documentIssuedDate.trim(),
-        documentIssuedPlace: formData.documentIssuedPlace.trim(),
-        documentFileName:
-          documentType === "Citizenship" ? docFrontFile?.name || "" : docFile?.name || "",
-        documentBackFileName:
-          documentType === "Citizenship" ? docBackFile?.name || "" : "",
-        documentImage: documentUrl || "",
-        documentBackImage: documentBackUrl || "",
-        faceCaptures: activeCaptures,
-        faceVideoUrl,
-        address: formData.currentProvince.trim(),
-        ocrData: ocrData,
-        ocrEditComparison: editComparison,
-        forgeryDecision: forgeryDecision,
-        forgeryScore: forgeryScore,
-        forgeryDetails: forgeryDetails,
-        documentUrl: documentUrl,
-        documentBackUrl: documentBackUrl,
-        documentFaceUrl: documentFaceUrl,
-        selfieUrl: backendSelfieUrl || selfieUrl,
-      };
-      addSubmission(submission);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
@@ -454,13 +387,7 @@ export default function OnboardingPage() {
       setIsSubmitted(true);
     } catch (error) {
       setIsStepLoading(false);
-      const message =
-        error?.name === "QuotaExceededError"
-          ? "Submission is too large to save locally. Please clear old KYC data in admin and try again."
-          : error?.message?.includes("Cloudinary")
-            ? "Could not upload verification photos. Please try again."
-            : "Unable to submit right now. Please try again.";
-      setSubmitError(message);
+      setSubmitError(error?.message || "Unable to complete submission. Please try again.");
       console.error("Onboarding submit failed:", error);
     }
   };
@@ -482,8 +409,6 @@ export default function OnboardingPage() {
     }
 
     await finalizeSubmission({
-      captures: result.captures,
-      backendRiskScore: result.riskScore,
       backendRiskFlags: result.riskFlags || {},
       backendSelfieUrl: result.selfieUrl,
       backendFaceIsMatch: result.faceIsMatch,

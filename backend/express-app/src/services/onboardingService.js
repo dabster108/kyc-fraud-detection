@@ -10,137 +10,146 @@ const ML_TIMEOUT = 45000;
 
 class OnboardingService {
   /**
-   * Runs soft duplicate checks against:
-   *   - onboarding_sessions  (previous attempts, including rejected/expired)
-   *   - verified_users       (already-approved users)
-   *   - device fingerprint / IP / submission speed signals
-   *
-   * Returns risk flags + a numeric risk score.
-   * DOES NOT hard-block — callers decide what to do with the score.
+   * True duplicate = already in verified_users (approved identity).
+   * Prior attempts in onboarding_sessions / extract_unofficial are counts only.
    */
-  async checkDuplicates({ email, panNumber, fullName, dob, phone, deviceFingerprint, ipAddress, submissionSpeedMs }) {
+  async _countOnboardingSessions(field, value, excludeSessionId = null) {
+    const clauses = {
+      phone: "phone_number = $1",
+      email: "LOWER(email) = $1",
+      pan: "pan_number = $1",
+      document: "UPPER(REPLACE(REPLACE(REPLACE(document_number, ' ', ''), '-', ''), '.', '')) = $1",
+    };
+    const sql = clauses[field];
+    if (!sql || !value) return 0;
+
+    const params = [value];
+    let query = `SELECT COUNT(*) AS cnt FROM onboarding_sessions WHERE ${sql} AND status NOT IN ('expired')`;
+    if (excludeSessionId) {
+      params.push(excludeSessionId);
+      query += ` AND id != $${params.length}`;
+    }
+    const { rows } = await pool.query(query, params);
+    return parseInt(rows[0].cnt, 10);
+  }
+
+  async _countExtractUnofficialDocNumber(documentNumber) {
+    const norm = this._normaliseDocNum(documentNumber);
+    if (!norm) return 0;
+    try {
+      const { rows } = await pool.query(
+        `SELECT COUNT(*) AS cnt
+         FROM   extract_unofficial
+         WHERE  UPPER(REPLACE(REPLACE(REPLACE(
+                  COALESCE(extracted_fields->>'citizenship_number', extracted_fields->>'document_number', ''),
+                  ' ', ''), '-', ''), '.', '')) = $1`,
+        [norm]
+      );
+      return parseInt(rows[0].cnt, 10);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Document (citizenship) number: verified_users = duplicate; others = count/risk only.
+   */
+  async assessDocumentNumberRisk(documentNumber, sessionId = null) {
+    const flags = {};
+    let score = 0;
+    if (!documentNumber?.trim()) return { flags, score };
+
+    const docNum = documentNumber.trim().toUpperCase();
+    const norm = this._normaliseDocNum(docNum);
+
+    const { rows: verifiedRows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM verified_users
+       WHERE UPPER(REPLACE(REPLACE(REPLACE(document_number, ' ', ''), '-', ''), '.', '')) = $1`,
+      [norm]
+    );
+    if (parseInt(verifiedRows[0].cnt, 10) > 0) {
+      flags.verified_user_document_exists = true;
+      score += 50;
+    }
+
+    const sessionCount = await this._countOnboardingSessions("document", norm, sessionId);
+    if (sessionCount > 0) {
+      flags.previous_document_attempts = sessionCount;
+      flags.onboarding_session_doc_count = sessionCount;
+      score += Math.min(sessionCount * 5, 20);
+    }
+
+    const unofficialCount = await this._countExtractUnofficialDocNumber(docNum);
+    if (unofficialCount > 0) {
+      flags.extract_unofficial_doc_count = unofficialCount;
+      score += Math.min(unofficialCount * 3, 15);
+    }
+
+    return { flags, score };
+  }
+
+  /**
+   * Phone: verified_users = duplicate; onboarding_sessions = count/risk only.
+   */
+  async assessPhoneRisk(phone, sessionId = null) {
+    const flags = {};
+    let score = 0;
+    if (!phone) return { flags, score };
+
+    const phoneNorm = phone.replace(/\s+/g, "");
+
+    const { rows: verifiedRows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM verified_users WHERE phone_number = $1`,
+      [phoneNorm]
+    );
+    if (parseInt(verifiedRows[0].cnt, 10) > 0) {
+      flags.verified_user_phone_exists = true;
+      score += 40;
+    }
+
+    const sessionCount = await this._countOnboardingSessions("phone", phoneNorm, sessionId);
+    if (sessionCount > 0) {
+      flags.previous_phone_attempts = sessionCount;
+      flags.onboarding_session_phone_count = sessionCount;
+      score += Math.min(sessionCount * 5, 20);
+    }
+
+    return { flags, score };
+  }
+
+  /**
+   * Identity + behaviour signals. Hard duplicates only via verified_users
+   * (citizenship/document number + phone). Other tables contribute counts only.
+   */
+  async checkDuplicates({ email, panNumber, phone, deviceFingerprint, ipAddress, submissionSpeedMs, sessionId }) {
     const riskFlags = {};
     let riskScore = 0;
 
     const norm = (v) => (v ? v.trim().toLowerCase() : null);
 
-    // ── Phone number checks ───────────────────────────────────────────────────
     if (phone) {
-      const phoneNorm = phone.replace(/\s+/g, "");
-
-      const [sessionRows, verifiedRows] = await Promise.all([
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   onboarding_sessions
-           WHERE  phone_number = $1
-             AND  status NOT IN ('expired')`,
-          [phoneNorm]
-        ),
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   verified_users
-           WHERE  phone_number = $1`,
-          [phoneNorm]
-        ),
-      ]);
-
-      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
-      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
-
-      if (verifiedExists) {
-        riskFlags.verified_user_phone_exists = true;
-        riskScore += 40;
-      }
-      if (prevAttempts > 0) {
-        riskFlags.duplicate_phone = true;
-        riskFlags.previous_phone_attempts = prevAttempts;
-        riskScore += Math.min(prevAttempts * 10, 30);
-      }
+      const { flags, score } = await this.assessPhoneRisk(phone, sessionId);
+      Object.assign(riskFlags, flags);
+      riskScore += score;
     }
 
-    // ── Email checks ─────────────────────────────────────────────────────────
     if (email) {
       const emailNorm = norm(email);
-
-      const [sessionRows, verifiedRows] = await Promise.all([
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   onboarding_sessions
-           WHERE  LOWER(email) = $1
-             AND  status NOT IN ('expired')`,
-          [emailNorm]
-        ),
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   verified_users
-           WHERE  LOWER(email) = $1`,
-          [emailNorm]
-        ),
-      ]);
-
-      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
-      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
-
-      if (verifiedExists) {
-        riskFlags.verified_user_email_exists = true;
-        riskScore += 40;
-      }
-
-      if (prevAttempts > 0) {
-        riskFlags.duplicate_email = true;
-        riskFlags.previous_email_attempts = prevAttempts;
-        // Each retry adds some risk, capped at 30 extra points
-        riskScore += Math.min(prevAttempts * 10, 30);
+      const sessionCount = await this._countOnboardingSessions("email", emailNorm, sessionId);
+      if (sessionCount > 0) {
+        riskFlags.previous_email_attempts = sessionCount;
+        riskFlags.onboarding_session_email_count = sessionCount;
+        riskScore += Math.min(sessionCount * 5, 20);
       }
     }
 
-    // ── PAN number checks ─────────────────────────────────────────────────────
     if (panNumber) {
       const pan = panNumber.trim().toUpperCase();
-
-      const [sessionRows, verifiedRows] = await Promise.all([
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   onboarding_sessions
-           WHERE  pan_number = $1
-             AND  status NOT IN ('expired')`,
-          [pan]
-        ),
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   verified_users
-           WHERE  pan_number = $1`,
-          [pan]
-        ),
-      ]);
-
-      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
-      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
-
-      if (verifiedExists) {
-        riskFlags.verified_user_pan_exists = true;
-        riskScore += 40;
-      }
-
-      if (prevAttempts > 0) {
-        riskFlags.duplicate_pan = true;
-        riskScore += 20;
-      }
-    }
-
-    // ── Full-name + DOB combo check against verified users ───────────────────
-    if (fullName && dob) {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) AS cnt
-         FROM   verified_users
-         WHERE  LOWER(full_name) = LOWER($1)
-           AND  dob = $2`,
-        [fullName.trim(), dob]
-      );
-
-      if (parseInt(rows[0].cnt, 10) > 0) {
-        riskFlags.name_dob_match_verified = true;
-        riskScore += 30;
+      const sessionCount = await this._countOnboardingSessions("pan", pan, sessionId);
+      if (sessionCount > 0) {
+        riskFlags.previous_pan_attempts = sessionCount;
+        riskFlags.onboarding_session_pan_count = sessionCount;
+        riskScore += Math.min(sessionCount * 5, 15);
       }
     }
 
@@ -548,13 +557,12 @@ class OnboardingService {
         docDupScore += 40;
       }
 
-      // Pending match: similar face seen in other unverified sessions —
-      // silent risk increase, not shown to the user.
+      // Pending/unverified embeddings: count only (not a verified-user duplicate).
       const pendingCount = docFaceExtraction.pending_duplicate_count || 0;
       if (pendingCount > 0) {
-        docDupFlags.duplicate_face_pending = true;
         docDupFlags.pending_face_attempt_count = pendingCount;
-        docDupScore += Math.min(pendingCount * 15, 30);
+        docDupFlags.onboarding_pending_face_count = pendingCount;
+        docDupScore += Math.min(pendingCount * 5, 20);
       }
     } else {
       console.warn("[onboarding] Face extract unavailable:", faceExtractOutcome.reason?.message);
@@ -586,40 +594,11 @@ class OnboardingService {
     const ocrName = this._extractOCRName(extractedFields);
     const ocrDocNumber = this._extractOCRDocNumber(extractedFields);
 
-    // ── 5b. Document number duplicate check ──────────────────────────────────
-    // The canonical number to check is what the user entered (more reliable
-    // than OCR which may have reading errors). We check against both tables.
+    // ── 5b. Document number: verified_users duplicate + attempt counts ───────
     if (documentNumber) {
-      const docNum = documentNumber.trim().toUpperCase();
-      const [sessionRows, verifiedRows] = await Promise.all([
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   onboarding_sessions
-           WHERE  UPPER(document_number) = $1
-             AND  id != $2
-             AND  status NOT IN ('expired')`,
-          [docNum, sessionId]
-        ),
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   verified_users
-           WHERE  UPPER(document_number) = $1`,
-          [docNum]
-        ),
-      ]);
-
-      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
-      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
-
-      if (verifiedExists) {
-        docDupFlags.verified_user_document_exists = true;
-        docDupScore += 50;
-      }
-      if (prevAttempts > 0) {
-        docDupFlags.duplicate_document_number = true;
-        docDupFlags.previous_document_attempts = prevAttempts;
-        docDupScore += Math.min(prevAttempts * 15, 30);
-      }
+      const docRisk = await this.assessDocumentNumberRisk(documentNumber, sessionId);
+      docDupFlags = { ...docDupFlags, ...docRisk.flags };
+      docDupScore += docRisk.score;
     }
 
     // ── 6. Risk assessment ───────────────────────────────────────────────────
@@ -1203,49 +1182,23 @@ class OnboardingService {
     const { riskFlags: dupFlags, riskScore: dupScore } = await this.checkDuplicates({
       email: formData.email,
       panNumber: formData.panNumber,
-      fullName: formData.fullName,
-      dob: formData.dob,
       phone: formData.phone || null,
       deviceFingerprint: formData.deviceFingerprint || session.device_fingerprint || null,
       ipAddress: meta.ipAddress || null,
       submissionSpeedMs: formData.submissionSpeedMs ?? null,
+      sessionId,
     });
 
     // ── OCR-vs-edit tamper check ─────────────────────────────────────────
     const editComparison = this.compareOcrVsEdited(session.ocr_result, formData);
 
-    // ── Document number duplicate check (now that user confirmed the number) ─
+    // ── Document number (citizenship): verified duplicate + attempt counts ───
     let docDupFlags = {};
     let docDupScore = 0;
     if (formData.documentNumber) {
-      const docNum = formData.documentNumber.trim().toUpperCase();
-      const [sessionRows, verifiedRows] = await Promise.all([
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   onboarding_sessions
-           WHERE  UPPER(document_number) = $1
-             AND  id != $2
-             AND  status NOT IN ('expired')`,
-          [docNum, sessionId]
-        ),
-        pool.query(
-          `SELECT COUNT(*) AS cnt
-           FROM   verified_users
-           WHERE  UPPER(document_number) = $1`,
-          [docNum]
-        ),
-      ]);
-      const prevAttempts = parseInt(sessionRows.rows[0].cnt, 10);
-      const verifiedExists = parseInt(verifiedRows.rows[0].cnt, 10) > 0;
-      if (verifiedExists) {
-        docDupFlags.verified_user_document_exists = true;
-        docDupScore += 50;
-      }
-      if (prevAttempts > 0) {
-        docDupFlags.duplicate_document_number = true;
-        docDupFlags.previous_document_attempts = prevAttempts;
-        docDupScore += Math.min(prevAttempts * 15, 30);
-      }
+      const docRisk = await this.assessDocumentNumberRisk(formData.documentNumber, sessionId);
+      docDupFlags = docRisk.flags;
+      docDupScore = docRisk.score;
     }
 
     const mergedRiskFlags = {
