@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # The dual-image call appends an extra user-message line identifying which
 # image is the front and which is the back.
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = r"""
 You are a KYC document parser for Nepali government ID documents.
 Analyze the image(s) and return ONLY a valid JSON object — no extra text,
 no markdown fences, no explanation.

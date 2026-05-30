@@ -86,6 +86,8 @@ export default function OnboardingPage() {
   const [documentFaceUrl, setDocumentFaceUrl] = useState(null);
   const [selfieUrl, setSelfieUrl] = useState(null);
   const [faceIsMatch, setFaceIsMatch] = useState(null);
+  const [faceSimilarityScore, setFaceSimilarityScore] = useState(null);
+  const [faceVerificationDone, setFaceVerificationDone] = useState(false);
   const [deviceFingerprint, setDeviceFingerprint] = useState(null);
   const pageLoadTimeRef = useRef(Date.now());
   const [isStepLoading, setIsStepLoading] = useState(false);
@@ -103,30 +105,11 @@ export default function OnboardingPage() {
   const recordChunksRef = useRef([]);
 
   const primaryAction = useMemo(() => {
-    if (step === 3) {
-      return {
-        label: "Submit Verification",
-        icon: <CheckIcon className="h-4 w-4" />,
-      };
-    }
-
     return {
       label: "Continue",
       icon: <ChevronRightIcon className="h-4 w-4" />,
     };
-  }, [step]);
-
-  const captureSteps = useMemo(
-    () => [
-      { key: "front", label: "Front", image: faceCaptures.front },
-      { key: "left", label: "Left", image: faceCaptures.left },
-      { key: "right", label: "Right", image: faceCaptures.right },
-    ],
-    [faceCaptures]
-  );
-
-  const currentCaptureIndex = captureSteps.findIndex((stepItem) => !stepItem.image);
-  const hasAllCaptures = currentCaptureIndex === -1;
+  }, []);
 
   useEffect(() => {
     setIsClient(true);
@@ -178,13 +161,13 @@ export default function OnboardingPage() {
   }, [cameraStream]);
 
   useEffect(() => {
-    if (!hasAllCaptures) {
+    if (!faceVerificationDone) {
       return;
     }
     if (recorderRef.current && recorderRef.current.state === "recording") {
       recorderRef.current.stop();
     }
-  }, [hasAllCaptures]);
+  }, [faceVerificationDone]);
 
   useEffect(() => {
     if (!docFile) {
@@ -382,6 +365,132 @@ export default function OnboardingPage() {
     return `KYC-${stamp}-${rand}`;
   };
 
+  const finalizeSubmission = async ({
+    captures,
+    backendRiskScore = null,
+    backendRiskFlags = {},
+    backendSelfieUrl = null,
+    backendFaceIsMatch = null,
+    backendFaceSimilarity = null,
+  }) => {
+    setSubmitError("");
+    setIsStepLoading(true);
+    try {
+      const activeCaptures = captures || faceCaptures;
+      const mergedRiskFlags = { ...riskFlags, ...backendRiskFlags };
+      if (backendFaceSimilarity != null) {
+        mergedRiskFlags.face_similarity = backendFaceSimilarity;
+      }
+
+      const submission = {
+        id: createSubmissionId(),
+        sessionId: sessionId || null,
+        name: formData.fullName.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        dob: formData.dob.trim(),
+        gender: formData.gender.trim(),
+        nationality: formData.nationality.trim(),
+        familySide: formData.familySide.trim(),
+        fatherName: formData.fatherName.trim(),
+        grandfatherName: formData.grandfatherName.trim(),
+        motherName: formData.motherName.trim(),
+        grandmotherName: formData.grandmotherName.trim(),
+        maritalStatus: formData.maritalStatus.trim(),
+        currentAddress: {
+          province: formData.currentProvince.trim(),
+          district: formData.currentDistrict.trim(),
+          municipality: formData.currentMunicipality.trim(),
+          ward: formData.currentWard.trim(),
+          street: formData.currentStreet.trim(),
+        },
+        permanentAddress: {
+          province: formData.permanentProvince.trim(),
+          district: formData.permanentDistrict.trim(),
+          municipality: formData.permanentMunicipality.trim(),
+          ward: formData.permanentWard.trim(),
+          street: formData.permanentStreet.trim(),
+        },
+        occupation: formData.occupation.trim(),
+        panNumber: formData.panNumber.trim(),
+        status: "Pending",
+        riskScore: backendRiskScore ?? 52,
+        riskFlags: mergedRiskFlags,
+        faceSimilarity:
+          backendFaceSimilarity ?? mergedRiskFlags.face_similarity ?? null,
+        faceIsMatch: backendFaceIsMatch ?? faceIsMatch,
+        submittedAt: formatTimestamp(new Date()),
+        channel: "Web",
+        documentType,
+        documentNumber: formData.documentNumber.trim(),
+        documentIssuedDate: formData.documentIssuedDate.trim(),
+        documentIssuedPlace: formData.documentIssuedPlace.trim(),
+        documentFileName:
+          documentType === "Citizenship" ? docFrontFile?.name || "" : docFile?.name || "",
+        documentBackFileName:
+          documentType === "Citizenship" ? docBackFile?.name || "" : "",
+        documentImage: documentUrl || "",
+        documentBackImage: documentBackUrl || "",
+        faceCaptures: activeCaptures,
+        faceVideoUrl,
+        address: formData.currentProvince.trim(),
+        ocrData: ocrData,
+        ocrEditComparison: editComparison,
+        forgeryDecision: forgeryDecision,
+        forgeryScore: forgeryScore,
+        forgeryDetails: forgeryDetails,
+        documentUrl: documentUrl,
+        documentBackUrl: documentBackUrl,
+        documentFaceUrl: documentFaceUrl,
+        selfieUrl: backendSelfieUrl || selfieUrl,
+      };
+      addSubmission(submission);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      setCameraReady(false);
+      setFaceVerificationDone(true);
+      setIsStepLoading(false);
+      setIsSubmitted(true);
+    } catch (error) {
+      setIsStepLoading(false);
+      const message =
+        error?.name === "QuotaExceededError"
+          ? "Submission is too large to save locally. Please clear old KYC data in admin and try again."
+          : error?.message?.includes("Cloudinary")
+            ? "Could not upload verification photos. Please try again."
+            : "Unable to submit right now. Please try again.";
+      setSubmitError(message);
+      console.error("Onboarding submit failed:", error);
+    }
+  };
+
+  const handleVerificationComplete = async (result) => {
+    if (faceVerificationDone || isStepLoading) {
+      return;
+    }
+    setFaceCaptures(result.captures);
+    if (result.selfieUrl) setSelfieUrl(result.selfieUrl);
+    if (result.faceIsMatch !== undefined && result.faceIsMatch !== null) {
+      setFaceIsMatch(result.faceIsMatch);
+    }
+    if (result.faceSimilarity != null) {
+      setFaceSimilarityScore(result.faceSimilarity);
+    }
+    if (result.riskFlags && Object.keys(result.riskFlags).length > 0) {
+      setRiskFlags((current) => ({ ...current, ...result.riskFlags }));
+    }
+
+    await finalizeSubmission({
+      captures: result.captures,
+      backendRiskScore: result.riskScore,
+      backendRiskFlags: result.riskFlags || {},
+      backendSelfieUrl: result.selfieUrl,
+      backendFaceIsMatch: result.faceIsMatch,
+      backendFaceSimilarity: result.faceSimilarity,
+    });
+  };
+
   const onNext = async () => {
     // ── STEP 1: Upload document → OCR + forgery, then pre-fill the form ──────
     if (step === 1) {
@@ -504,148 +613,6 @@ export default function OnboardingPage() {
       return;
     }
 
-    // ── STEP 3: Face verification + final submission ─────────────────────────
-    if (step === 3) {
-      setSubmitError("");
-      setIsStepLoading(true);
-      try {
-        // ── Helper: convert a data URL to a File blob ───────────────────────
-        const dataUrlToBlob = (dataUrl, filename) => {
-          const [header, base64] = dataUrl.split(",");
-          const mime = header.match(/:(.*?);/)[1];
-          const binary = atob(base64);
-          const arr = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-          return new File([arr], filename, { type: mime });
-        };
-
-        // ── 1. Send selfies to backend ──────────────────────────────────────
-        let backendRiskScore = null;
-        let backendRiskFlags = {};
-        let backendSelfieUrl = selfieUrl;
-        let backendFaceIsMatch = faceIsMatch;
-
-        if (sessionId && faceCaptures.front) {
-          const fd = new FormData();
-          fd.append("selfie_front", dataUrlToBlob(faceCaptures.front, "selfie_front.jpg"));
-          if (faceCaptures.left) {
-            fd.append("selfie_left", dataUrlToBlob(faceCaptures.left, "selfie_left.jpg"));
-          }
-          if (faceCaptures.right) {
-            fd.append("selfie_right", dataUrlToBlob(faceCaptures.right, "selfie_right.jpg"));
-          }
-
-          const res = await fetch(
-            `http://localhost:5000/api/v1/onboarding/session/${sessionId}/selfie`,
-            { method: "PUT", body: fd }
-          );
-          const data = await res.json();
-
-          if (!res.ok || !data.success) {
-            setSubmitError(
-              data.error || "Could not upload selfies. Please try again."
-            );
-            setIsStepLoading(false);
-            return;
-          }
-
-          backendRiskScore = data.riskScore;
-          backendRiskFlags = data.riskFlags || {};
-          setRiskFlags(backendRiskFlags);
-          if (data.selfieUrl) {
-            backendSelfieUrl = data.selfieUrl;
-            setSelfieUrl(data.selfieUrl);
-          }
-          if (data.isMatch !== undefined) {
-            backendFaceIsMatch = data.isMatch;
-            setFaceIsMatch(data.isMatch);
-          }
-        }
-
-        // ── 2. Build localStorage submission for admin panel ───────────────
-        // Use Cloudinary URLs — not base64 — so we stay within localStorage limits.
-        const submission = {
-          id: createSubmissionId(),
-          sessionId: sessionId || null,
-          name: formData.fullName.trim(),
-          email: formData.email.trim(),
-          phone: formData.phone.trim(),
-          dob: formData.dob.trim(),
-          gender: formData.gender.trim(),
-          nationality: formData.nationality.trim(),
-          familySide: formData.familySide.trim(),
-          fatherName: formData.fatherName.trim(),
-          grandfatherName: formData.grandfatherName.trim(),
-          motherName: formData.motherName.trim(),
-          grandmotherName: formData.grandmotherName.trim(),
-          maritalStatus: formData.maritalStatus.trim(),
-          currentAddress: {
-            province: formData.currentProvince.trim(),
-            district: formData.currentDistrict.trim(),
-            municipality: formData.currentMunicipality.trim(),
-            ward: formData.currentWard.trim(),
-            street: formData.currentStreet.trim(),
-          },
-          permanentAddress: {
-            province: formData.permanentProvince.trim(),
-            district: formData.permanentDistrict.trim(),
-            municipality: formData.permanentMunicipality.trim(),
-            ward: formData.permanentWard.trim(),
-            street: formData.permanentStreet.trim(),
-          },
-          occupation: formData.occupation.trim(),
-          panNumber: formData.panNumber.trim(),
-          status: "Pending",
-          riskScore: backendRiskScore ?? 52,
-          riskFlags: backendRiskFlags,
-          faceSimilarity: backendRiskFlags.face_similarity ?? null,
-          faceIsMatch: backendFaceIsMatch,
-          submittedAt: formatTimestamp(new Date()),
-          channel: "Web",
-          documentType,
-          documentNumber: formData.documentNumber.trim(),
-          documentIssuedDate: formData.documentIssuedDate.trim(),
-          documentIssuedPlace: formData.documentIssuedPlace.trim(),
-          documentFileName:
-            documentType === "Citizenship" ? docFrontFile?.name || "" : docFile?.name || "",
-          documentBackFileName:
-            documentType === "Citizenship" ? docBackFile?.name || "" : "",
-          documentImage: documentUrl || "",
-          documentBackImage: documentBackUrl || "",
-          faceCaptures,
-          faceVideoUrl,
-          address: formData.currentProvince.trim(),
-          // ML analysis data
-          ocrData: ocrData,
-          ocrEditComparison: editComparison,
-          forgeryDecision: forgeryDecision,
-          forgeryScore: forgeryScore,
-          forgeryDetails: forgeryDetails,
-          documentUrl: documentUrl,
-          documentBackUrl: documentBackUrl,
-          documentFaceUrl: documentFaceUrl,
-          selfieUrl: backendSelfieUrl,
-        };
-        addSubmission(submission);
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-        }
-        setCameraReady(false);
-        setIsStepLoading(false);
-        setIsSubmitted(true);
-      } catch (error) {
-        setIsStepLoading(false);
-        const message =
-          error?.name === "QuotaExceededError"
-            ? "Submission is too large to save locally. Please clear old KYC data in admin and try again."
-            : error?.message?.includes("Cloudinary")
-              ? "Could not upload verification photos. Please try again."
-              : "Unable to submit right now. Please try again.";
-        setSubmitError(message);
-        console.error("Onboarding submit failed:", error);
-      }
-      return;
-    }
   };
 
   const onBack = () => {
@@ -695,11 +662,11 @@ export default function OnboardingPage() {
     }
 
     if (step === 3) {
-      return cameraReady && hasAllCaptures;
+      return false;
     }
 
     return true;
-  }, [cameraReady, docFile, docFrontFile, docBackFile, documentType, formData, hasAllCaptures, isStepLoading, step]);
+  }, [docFile, docFrontFile, docBackFile, documentType, formData, isStepLoading, step]);
 
   const handleInputChange = (key) => (event) => {
     const value =
@@ -897,39 +864,6 @@ export default function OnboardingPage() {
     }
   };
 
-  const capturePhoto = () => {
-    if (!videoRef.current || currentCaptureIndex === -1) {
-      return;
-    }
-    const video = videoRef.current;
-    const canvas = document.createElement("canvas");
-    const width = video.videoWidth || 720;
-    const height = video.videoHeight || 720;
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
-    }
-    context.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    const targetKey = captureSteps[currentCaptureIndex]?.key;
-    if (!targetKey) {
-      return;
-    }
-    setFaceCaptures((current) => ({ ...current, [targetKey]: dataUrl }));
-  };
-
-  const clearCapturesFrom = (index) => {
-    setFaceCaptures((current) => {
-      const next = { ...current };
-      captureSteps.slice(index).forEach((stepItem) => {
-        next[stepItem.key] = null;
-      });
-      return next;
-    });
-  };
-
   const resetFlow = () => {
     setIsSubmitted(false);
     setStep(1);
@@ -940,6 +874,8 @@ export default function OnboardingPage() {
     setDocFrontFile(null);
     setDocBackFile(null);
     setFaceCaptures({ front: null, left: null, right: null });
+    setFaceVerificationDone(false);
+    setFaceSimilarityScore(null);
     setSessionId(null);
     setOcrData(null);
     setOcrPrefilledKeys([]);
@@ -1112,12 +1048,9 @@ export default function OnboardingPage() {
                     cameraError={cameraError}
                     videoRef={videoRef}
                     onStartCamera={startCamera}
-                    captureSteps={captureSteps}
-                    currentCaptureIndex={currentCaptureIndex}
-                    onCapture={capturePhoto}
-                    onRetakeCapture={clearCapturesFrom}
-                    onUndoCapture={clearCapturesFrom}
-                    recordingStatus={recordingStatus}
+                    sessionId={sessionId}
+                    onVerificationComplete={handleVerificationComplete}
+                    onVerificationError={setSubmitError}
                   />
                 </div>
               )}
@@ -1271,30 +1204,38 @@ export default function OnboardingPage() {
                 Back
               </button>
 
-              <button
-                onClick={onNext}
-                disabled={isClient ? !canProceed : undefined}
-                className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
-                  canProceed
-                    ? "bg-[var(--brand)]"
-                    : "cursor-not-allowed bg-[#9CA3AF]"
-                }`}
-              >
-                {isStepLoading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
-                    {step === 1 ? "Reading document…" : "Saving…"}
-                  </span>
-                ) : (
-                  <>
-                    {primaryAction.label}
-                    {primaryAction.icon}
-                  </>
-                )}
-              </button>
+              {step === 3 ? (
+                <p className="text-sm text-[#64748B]">
+                  {isStepLoading
+                    ? "Submitting verification…"
+                    : "Complete the face guide above — submission is automatic."}
+                </p>
+              ) : (
+                <button
+                  onClick={onNext}
+                  disabled={isClient ? !canProceed : undefined}
+                  className={`flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white transition ${
+                    canProceed
+                      ? "bg-[var(--brand)]"
+                      : "cursor-not-allowed bg-[#9CA3AF]"
+                  }`}
+                >
+                  {isStepLoading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      {step === 1 ? "Reading document…" : "Saving…"}
+                    </span>
+                  ) : (
+                    <>
+                      {primaryAction.label}
+                      {primaryAction.icon}
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         )}
