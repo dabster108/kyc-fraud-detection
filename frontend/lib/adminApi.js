@@ -48,3 +48,19 @@ export async function fetchDashboardMetrics() {
   const data = await parseJson(res);
   return data.metrics;
 }
+
+export async function fetchSettings() {
+  const res = await fetch(`${API_BASE_URL}/admin/settings`);
+  const data = await parseJson(res);
+  return data.settings;
+}
+
+export async function updateSettings(settings) {
+  const res = await fetch(`${API_BASE_URL}/admin/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  const data = await parseJson(res);
+  return data.settings;
+}

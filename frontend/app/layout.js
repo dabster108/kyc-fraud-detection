@@ -9,7 +9,8 @@ const lato = Lato({
 
 export const metadata = {
   title: "eKS - eSewa KYC Shield",
-  description: "KYC onboarding flow for eKS",
+  description:
+    "Nepali ID verification with OCR, forgery detection, liveness, face match, and explainable risk scoring.",
 };
 
 export default function RootLayout({ children }) {
@@ -18,7 +19,9 @@ export default function RootLayout({ children }) {
       lang="en"
       className={lato.variable}
     >
-      <body className="min-h-screen text-[#0F172A] antialiased">
+      <body
+        className={`${lato.className} min-h-screen text-[#0F172A] antialiased`}
+      >
         {children}
       </body>
     </html>

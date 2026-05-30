@@ -16,6 +16,8 @@ cloudinary.config({
  * @param {string} [opts.publicId] - Optional explicit public_id
  * @returns {Promise<string>} secure_url
  */
+const UPLOAD_TIMEOUT_MS = 60_000;
+
 function uploadBuffer(buffer, { folder = "kyc", publicId } = {}) {
   return new Promise((resolve, reject) => {
     const opts = {
@@ -24,7 +26,12 @@ function uploadBuffer(buffer, { folder = "kyc", publicId } = {}) {
       ...(publicId ? { public_id: publicId } : {}),
     };
 
+    const timer = setTimeout(() => {
+      reject(new Error("Cloudinary upload timed out"));
+    }, UPLOAD_TIMEOUT_MS);
+
     const stream = cloudinary.uploader.upload_stream(opts, (error, result) => {
+      clearTimeout(timer);
       if (error) {
         reject(new Error(`Cloudinary upload failed: ${error.message}`));
       } else {

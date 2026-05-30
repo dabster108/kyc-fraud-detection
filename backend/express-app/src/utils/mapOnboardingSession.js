@@ -25,8 +25,11 @@ function formatTimestamp(value) {
 /**
  * Map onboarding_sessions DB row → shape expected by the admin UI.
  */
-function mapOnboardingSession(row) {
+function mapOnboardingSession(row, options = {}) {
   if (!row) return null;
+
+  const highRiskThreshold = options.highRiskThreshold ?? 70;
+  const faceMatchThreshold = options.faceMatchThreshold ?? 0.65;
 
   const riskScore = Math.round(Number(row.risk_score) || 0);
   const riskFlags =
@@ -37,7 +40,7 @@ function mapOnboardingSession(row) {
   let status = "Pending";
   if (row.status === "approved") status = "Approved";
   else if (row.status === "rejected") status = "Rejected";
-  else if (riskScore >= 70) status = "Flagged";
+  else if (riskScore >= highRiskThreshold) status = "Flagged";
 
   const forgeryResult = safeJson(row.forgery_result);
   const ocrResult = safeJson(row.ocr_result);
@@ -72,7 +75,9 @@ function mapOnboardingSession(row) {
     riskFlags,
     faceSimilarity: row.face_similarity,
     faceIsMatch:
-      row.face_similarity != null ? Number(row.face_similarity) >= 0.65 : null,
+      row.face_similarity != null
+        ? Number(row.face_similarity) >= faceMatchThreshold
+        : null,
     submittedAt: formatTimestamp(row.updated_at || row.created_at),
     createdAt: row.created_at,
     channel: "Web",
@@ -88,6 +93,11 @@ function mapOnboardingSession(row) {
     selfieUrl: row.selfie_url,
     selfieLeftUrl: row.selfie_left_url,
     selfieRightUrl: row.selfie_right_url,
+    faceCaptures: {
+      front: row.selfie_url || null,
+      left: row.selfie_left_url || null,
+      right: row.selfie_right_url || null,
+    },
     ocrName: row.ocr_name,
     ocrDocumentNumber: row.ocr_document_number,
     ocrData: Object.keys(ocrResult).length

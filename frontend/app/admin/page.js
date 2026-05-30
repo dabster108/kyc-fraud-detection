@@ -2,10 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchSubmissions } from "../../lib/adminApi";
+import {
+  fetchSubmissions,
+  fetchSettings,
+  updateSettings,
+} from "../../lib/adminApi";
 import AdminSidebar from "./AdminSidebar";
+import AdminShell from "./AdminShell";
 
 const AUTH_KEY = "adminAuthed";
+
+const DEFAULT_SETTINGS = {
+  lowRiskThreshold: 40,
+  highRiskThreshold: 70,
+  duplicateFaceThreshold: 0.6,
+  faceMatchThreshold: 0.65,
+};
 
 const STATUS_COLORS = {
   Approved: "bg-emerald-100 text-emerald-700",
@@ -14,15 +26,15 @@ const STATUS_COLORS = {
   Rejected: "bg-red-100 text-red-700",
 };
 
-const RISK_COLOR = (score) => {
-  if (score >= 70) return "text-red-600 font-bold";
-  if (score >= 40) return "text-amber-600 font-semibold";
+const riskColor = (score, lowRisk = 40, highRisk = 70) => {
+  if (score >= highRisk) return "text-red-600 font-bold";
+  if (score > lowRisk) return "text-amber-600 font-semibold";
   return "text-emerald-600 font-semibold";
 };
 
-const RISK_BAR_COLOR = (score) => {
-  if (score >= 70) return "bg-red-500";
-  if (score >= 40) return "bg-amber-400";
+const riskBarColor = (score, lowRisk = 40, highRisk = 70) => {
+  if (score >= highRisk) return "bg-red-500";
+  if (score > lowRisk) return "bg-amber-400";
   return "bg-emerald-500";
 };
 
@@ -38,6 +50,23 @@ export default function AdminPanelPage() {
   const [docFilter, setDocFilter] = useState("All");
   const [loadError, setLoadError] = useState("");
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [appSettings, setAppSettings] = useState({ ...DEFAULT_SETTINGS });
+  const [settingsDraft, setSettingsDraft] = useState({ ...DEFAULT_SETTINGS });
+  const [settingsMsg, setSettingsMsg] = useState("");
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  const lowRiskThreshold = appSettings.lowRiskThreshold ?? 40;
+  const highRiskThreshold = appSettings.highRiskThreshold ?? 70;
+
+  const loadSettings = async () => {
+    try {
+      const s = await fetchSettings();
+      setAppSettings(s);
+      setSettingsDraft(s);
+    } catch {
+      /* table may not exist yet — defaults apply */
+    }
+  };
 
   const loadSubmissions = async () => {
     setIsLoadingList(true);
@@ -62,6 +91,7 @@ export default function AdminPanelPage() {
     if (stored === "1") {
       setIsAuthed(true);
       loadSubmissions();
+      loadSettings();
     }
   }, []);
 
@@ -71,13 +101,15 @@ export default function AdminPanelPage() {
     const approved = submissions.filter((s) => s.status === "Approved").length;
     const flagged = submissions.filter((s) => s.status === "Flagged").length;
     const rejected = submissions.filter((s) => s.status === "Rejected").length;
-    const highRisk = submissions.filter((s) => s.riskScore >= 70).length;
+    const highRisk = submissions.filter(
+      (s) => s.riskScore >= highRiskThreshold
+    ).length;
     const avgRisk = total
       ? Math.round(submissions.reduce((sum, s) => sum + (s.riskScore || 0), 0) / total)
       : 0;
     const approvalRate = total ? Math.round((approved / total) * 100) : 0;
     return { total, pending, approved, flagged, rejected, highRisk, avgRisk, approvalRate };
-  }, [submissions]);
+  }, [submissions, highRiskThreshold]);
 
   const docTypeCounts = useMemo(() => {
     const counts = {};
@@ -110,9 +142,42 @@ export default function AdminPanelPage() {
   }, [submissions, search, statusFilter, docFilter]);
 
   const flaggedSubmissions = useMemo(
-    () => submissions.filter((s) => s.status === "Flagged" || s.riskScore >= 70),
-    [submissions]
+    () =>
+      submissions.filter(
+        (s) => s.status === "Flagged" || s.riskScore >= highRiskThreshold
+      ),
+    [submissions, highRiskThreshold]
   );
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    setSettingsMsg("");
+    try {
+      const low = Number(settingsDraft.lowRiskThreshold);
+      const high = Number(settingsDraft.highRiskThreshold);
+      if (low >= high) {
+        setSettingsMsg("Low risk threshold must be less than high risk threshold.");
+        setIsSavingSettings(false);
+        return;
+      }
+      const saved = await updateSettings({
+        lowRiskThreshold: low,
+        highRiskThreshold: high,
+        duplicateFaceThreshold: Number(settingsDraft.duplicateFaceThreshold),
+        faceMatchThreshold: Number(settingsDraft.faceMatchThreshold),
+      });
+      setAppSettings(saved);
+      setSettingsDraft(saved);
+      setSettingsMsg("Settings saved. New thresholds apply to the next KYC check.");
+      await loadSubmissions();
+    } catch (err) {
+      setSettingsMsg(err.message || "Could not save settings.");
+    } finally {
+      setIsSavingSettings(false);
+      setTimeout(() => setSettingsMsg(""), 4000);
+    }
+  };
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -121,6 +186,7 @@ export default function AdminPanelPage() {
       if (typeof window !== "undefined") window.sessionStorage.setItem(AUTH_KEY, "1");
       setAuthError("");
       loadSubmissions();
+      loadSettings();
     } else {
       setAuthError("Invalid credentials. Use admin / admin.");
     }
@@ -133,20 +199,18 @@ export default function AdminPanelPage() {
 
   if (!isAuthed) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0F172A] to-[#1E293B] px-4">
-        <div className="w-full max-w-md rounded-2xl bg-white p-10 shadow-2xl">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--brand)] text-white text-lg font-bold">e</div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-[#94A3B8]">eKS Platform</p>
-              <p className="font-display text-xl font-bold text-[#0B1324]">Admin Portal</p>
-            </div>
+      <div className="flex min-h-screen items-center justify-center bg-[#f4f5f7] px-4">
+        <div className="w-full max-w-md rounded-lg border border-[#e2e8f0] bg-white p-8 shadow-sm">
+          <div className="mb-6">
+            <p className="text-sm font-semibold text-[#0f172a]">eKS Admin</p>
+            <p className="mt-1 text-sm text-[#64748b]">Sign in to review submissions.</p>
           </div>
-          <h1 className="text-2xl font-bold text-[#0B1324]">Sign in</h1>
-          <p className="mt-1 text-sm text-[#64748B]">Access the KYC review dashboard.</p>
+          <h1 className="font-display text-2xl font-semibold text-[#0f172a]">
+            Sign in
+          </h1>
           <form className="mt-6 flex flex-col gap-4" onSubmit={handleLogin}>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Username</label>
+              <label className="text-xs font-medium text-[#64748b]">Username</label>
               <input
                 type="text"
                 value={credentials.username}
@@ -156,7 +220,7 @@ export default function AdminPanelPage() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Password</label>
+              <label className="text-xs font-medium text-[#64748b]">Password</label>
               <input
                 type="password"
                 value={credentials.password}
@@ -180,39 +244,42 @@ export default function AdminPanelPage() {
     );
   }
 
+  const tabTitles = {
+    overview: "Overview",
+    submissions: "Submissions",
+    flagged: "High risk queue",
+    analytics: "Analytics",
+    settings: "Settings",
+  };
+
   return (
-    <div className="flex min-h-screen bg-[#F1F5F9]">
-      <AdminSidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        stats={{ total: stats.total, flaggedCount: flaggedSubmissions.length }}
-        onLogout={handleLogout}
-      />
-
-      {/* Main content */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Top bar */}
-        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[#E2E8F0] bg-white px-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">
-              {{ overview: "Overview", submissions: "All Submissions", flagged: "Flagged & High Risk", analytics: "Analytics", settings: "Settings" }[activeTab]}
-            </p>
-            <p className="font-semibold text-[#0B1324]">KYC Review Dashboard</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-              ● Live
-            </span>
-            <button
-              onClick={() => loadSubmissions()}
-              className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-xs font-semibold text-[#64748B] transition hover:border-[#CBD5E1] hover:text-[#0F172A]"
-            >
-              ↻ Refresh
-            </button>
-          </div>
+    <AdminShell
+      sidebar={({ collapsed, onCollapsedChange }) => (
+        <AdminSidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          stats={{ total: stats.total, flaggedCount: flaggedSubmissions.length }}
+          onLogout={handleLogout}
+          collapsed={collapsed}
+          onCollapsedChange={onCollapsedChange}
+        />
+      )}
+      header={
+        <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-[#e2e8f0] bg-white px-6">
+          <h1 className="text-base font-semibold text-[#0f172a]">
+            {tabTitles[activeTab] || "Admin"}
+          </h1>
+          <button
+            type="button"
+            onClick={() => loadSubmissions()}
+            className="rounded-md border border-[#e2e8f0] bg-white px-3 py-1.5 text-sm text-[#475569] hover:bg-[#f4f5f7]"
+          >
+            Refresh
+          </button>
         </header>
-
-        <main className="flex-1 overflow-y-auto p-6">
+      }
+    >
+      <div className="p-6">
           {loadError ? (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {loadError}
@@ -228,7 +295,9 @@ export default function AdminPanelPage() {
           {activeTab === "overview" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Overview</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Overview
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Real-time KYC submission metrics and risk summary.</p>
               </div>
 
@@ -254,7 +323,7 @@ export default function AdminPanelPage() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 {[
                   { label: "Flagged", value: stats.flagged, sub: "Needs escalation", color: "text-amber-600", dot: "bg-amber-400" },
-                  { label: "High Risk (≥70)", value: stats.highRisk, sub: "Critical cases", color: "text-red-600", dot: "bg-red-500" },
+                  { label: `High Risk (≥${highRiskThreshold})`, value: stats.highRisk, sub: "Critical cases", color: "text-red-600", dot: "bg-red-500" },
                   { label: "Avg Risk Score", value: `${stats.avgRisk}`, sub: "Across all submissions", color: "text-[#0B1324]", dot: "bg-slate-400" },
                 ].map((card) => (
                   <div key={card.label} className="rounded-2xl bg-white p-5 shadow-sm">
@@ -323,7 +392,7 @@ export default function AdminPanelPage() {
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_COLORS[s.status] || "bg-gray-100 text-gray-600"}`}>
                         {s.status}
                       </span>
-                      <span className={`text-sm ${RISK_COLOR(s.riskScore)}`}>{s.riskScore}%</span>
+                      <span className={`text-sm ${riskColor(s.riskScore, lowRiskThreshold, highRiskThreshold)}`}>{s.riskScore}%</span>
                     </div>
                   ))}
                 </div>
@@ -336,7 +405,7 @@ export default function AdminPanelPage() {
             <div className="space-y-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-[#0B1324]">
+                  <h2 className="font-display text-3xl font-bold text-[#0B1324]">
                     {activeTab === "flagged" ? "Flagged & High Risk" : "All Submissions"}
                   </h2>
                   <p className="mt-1 text-sm text-[#64748B]">
@@ -370,7 +439,7 @@ export default function AdminPanelPage() {
                     onChange={(e) => setDocFilter(e.target.value)}
                     className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm text-[#0F172A] focus:border-[var(--brand)] focus:outline-none"
                   >
-                    {["All", "Passport", "Citizenship", "Driving License"].map((d) => (
+                    {["All", "Citizenship", "National ID", "Driving license"].map((d) => (
                       <option key={d}>{d}</option>
                     ))}
                   </select>
@@ -431,11 +500,11 @@ export default function AdminPanelPage() {
                             <div className="flex items-center gap-2">
                               <div className="h-1.5 w-16 rounded-full bg-[#F1F5F9]">
                                 <div
-                                  className={`h-1.5 rounded-full ${RISK_BAR_COLOR(item.riskScore)}`}
+                                  className={`h-1.5 rounded-full ${riskBarColor(item.riskScore, lowRiskThreshold, highRiskThreshold)}`}
                                   style={{ width: `${item.riskScore}%` }}
                                 />
                               </div>
-                              <span className={`text-sm ${RISK_COLOR(item.riskScore)}`}>{item.riskScore}%</span>
+                              <span className={`text-sm ${riskColor(item.riskScore, lowRiskThreshold, highRiskThreshold)}`}>{item.riskScore}%</span>
                             </div>
                           </td>
                           <td className="px-5 py-4 text-xs text-[#64748B]">{item.submittedAt}</td>
@@ -472,7 +541,9 @@ export default function AdminPanelPage() {
           {activeTab === "analytics" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Analytics</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Analytics
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Patterns and distributions across all KYC submissions.</p>
               </div>
 
@@ -533,7 +604,12 @@ export default function AdminPanelPage() {
                         submissions.filter((s) => s.riskScore >= j * 10 && s.riskScore < j * 10 + 10).length
                       ), 1);
                       const pct = (cnt / maxCnt) * 100;
-                      const barColor = hi <= 40 ? "bg-emerald-400" : hi <= 70 ? "bg-amber-400" : "bg-red-500";
+                      const barColor =
+                        hi <= lowRiskThreshold
+                          ? "bg-emerald-400"
+                          : hi <= highRiskThreshold
+                            ? "bg-amber-400"
+                            : "bg-red-500";
                       return (
                         <div key={lo} className="flex flex-1 flex-col items-center gap-1">
                           <span className="text-[10px] font-semibold text-[#94A3B8]">{cnt}</span>
@@ -549,9 +625,9 @@ export default function AdminPanelPage() {
                     })}
                   </div>
                   <div className="mt-3 flex gap-4 text-xs">
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-emerald-400" /> Low (0–40)</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate (40–70)</span>
-                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High (70–100)</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-emerald-400" /> Low (0–{lowRiskThreshold})</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-amber-400" /> Moderate ({lowRiskThreshold + 1}–{highRiskThreshold})</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-red-500" /> High ({highRiskThreshold + 1}–100)</span>
                   </div>
                 </div>
               </div>
@@ -562,29 +638,94 @@ export default function AdminPanelPage() {
           {activeTab === "settings" && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-[#0B1324]">Settings</h2>
+                <h2 className="font-display text-3xl font-bold text-[#0B1324]">
+                  Settings
+                </h2>
                 <p className="mt-1 text-sm text-[#64748B]">Admin panel configuration.</p>
               </div>
               <div className="rounded-2xl bg-white p-8 shadow-sm">
-                <div className="space-y-6 divide-y divide-[#F1F5F9]">
+                <form onSubmit={handleSaveSettings} className="space-y-6 divide-y divide-[#F1F5F9]">
+                  <div className="flex items-start justify-between gap-6 pt-0">
+                    <div>
+                      <p className="text-sm font-semibold text-[#0F172A]">Administrator Account</p>
+                      <p className="mt-0.5 text-xs text-[#94A3B8]">Demo login only (admin / admin).</p>
+                    </div>
+                    <span className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 font-mono text-sm">admin</span>
+                  </div>
+
                   {[
-                    { label: "Administrator Account", value: "admin", sub: "Username cannot be changed in demo mode." },
-                    { label: "KYC API Endpoint", value: "http://localhost:3002/api/v1", sub: "Express backend base URL." },
-                    { label: "ML Services Endpoint", value: "http://localhost:8000/api/v1", sub: "FastAPI ML services base URL." },
-                    { label: "Risk Threshold — High", value: "70", sub: "Submissions above this score are flagged as high risk." },
-                    { label: "Duplicate Face Threshold", value: "0.6", sub: "Cosine similarity threshold for face duplicate detection." },
+                    {
+                      key: "lowRiskThreshold",
+                      label: "Risk Threshold — Low",
+                      sub: "Scores at or below this are low risk (green). Also used as the auto-approve ceiling after selfie verification.",
+                      step: "1",
+                      min: 1,
+                      max: 100,
+                    },
+                    {
+                      key: "highRiskThreshold",
+                      label: "Risk Threshold — High",
+                      sub: "Submissions at or above this score are flagged as high risk in the admin panel.",
+                      step: "1",
+                      min: 1,
+                      max: 100,
+                    },
+                    {
+                      key: "duplicateFaceThreshold",
+                      label: "Duplicate Face Threshold",
+                      sub: "Cosine similarity for matching faces against verified users (document + embeddings).",
+                      step: "0.01",
+                      min: 0.1,
+                      max: 1,
+                    },
+                    {
+                      key: "faceMatchThreshold",
+                      label: "Selfie vs Document Match",
+                      sub: "Minimum similarity for live selfie to match the ID photo.",
+                      step: "0.01",
+                      min: 0.1,
+                      max: 1,
+                    },
                   ].map((row) => (
-                    <div key={row.label} className="flex items-start justify-between gap-6 pt-5 first:pt-0">
-                      <div>
+                    <div key={row.key} className="flex items-start justify-between gap-6 pt-5">
+                      <div className="flex-1">
                         <p className="text-sm font-semibold text-[#0F172A]">{row.label}</p>
                         <p className="mt-0.5 text-xs text-[#94A3B8]">{row.sub}</p>
                       </div>
-                      <span className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 font-mono text-sm text-[#0B1324]">
-                        {row.value}
-                      </span>
+                      <input
+                        type="number"
+                        step={row.step}
+                        min={row.min}
+                        max={row.max}
+                        value={settingsDraft[row.key] ?? ""}
+                        onChange={(e) =>
+                          setSettingsDraft((d) => ({
+                            ...d,
+                            [row.key]: e.target.value,
+                          }))
+                        }
+                        className="w-28 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-right font-mono text-sm text-[#0B1324] focus:border-[var(--brand)] focus:outline-none"
+                      />
                     </div>
                   ))}
-                </div>
+
+                  <div className="flex items-center justify-between gap-4 pt-6">
+                    {settingsMsg ? (
+                      <p className="text-sm text-[#0F172A]">{settingsMsg}</p>
+                    ) : (
+                      <p className="text-xs text-[#94A3B8]">
+                        Stored in Supabase <code className="font-mono">app_settings</code>.
+                      </p>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isSavingSettings}
+                      className="rounded-xl bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {isSavingSettings ? "Saving…" : "Save settings"}
+                    </button>
+                  </div>
+                </form>
                 <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <p className="text-sm font-semibold text-emerald-800">Data storage</p>
                   <p className="mt-1 text-xs text-emerald-700">
@@ -594,8 +735,7 @@ export default function AdminPanelPage() {
               </div>
             </div>
           )}
-        </main>
       </div>
-    </div>
+    </AdminShell>
   );
 }

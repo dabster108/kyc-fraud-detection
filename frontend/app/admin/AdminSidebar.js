@@ -2,145 +2,138 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Logo from "../components/ui/Logo";
 
 const NAV_ITEMS = [
-  { id: "overview",    label: "Overview",           icon: "⬡" },
-  { id: "submissions", label: "All Submissions",     icon: "≡" },
-  { id: "flagged",     label: "Flagged & High Risk", icon: "⚑" },
-  { id: "analytics",   label: "Analytics",           icon: "◈" },
-  { id: "settings",    label: "Settings",            icon: "⚙" },
+  { id: "overview", label: "Overview" },
+  { id: "submissions", label: "Submissions" },
+  { id: "flagged", label: "High risk" },
+  { id: "analytics", label: "Analytics" },
+  { id: "settings", label: "Settings" },
 ];
 
-/**
- * Shared sidebar for all admin pages.
- *
- * Props:
- *  - activeTab:    currently active nav item id
- *  - onTabChange:  if provided, nav items are <button> that call this; otherwise they are
- *                  <Link> pointing to /admin?tab=<id>
- *  - stats:        { total, flaggedCount } — used for nav badges
- *  - onLogout:     called when the logout button is clicked
- *  - children:     optional slot rendered between the nav and the user footer
- *                  (e.g. applicant quick-info on the detail page)
- */
+export const SIDEBAR_WIDTH_EXPANDED = 220;
+export const SIDEBAR_WIDTH_COLLAPSED = 56;
+
 export default function AdminSidebar({
   activeTab,
   onTabChange,
   stats = {},
   onLogout,
   children,
+  collapsed: collapsedProp,
+  onCollapsedChange,
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsedInternal, setCollapsedInternal] = useState(false);
+  const collapsed = collapsedProp ?? collapsedInternal;
+
+  const setCollapsed = (value) => {
+    if (collapsedProp === undefined) {
+      setCollapsedInternal(value);
+    }
+    onCollapsedChange?.(value);
+  };
 
   const getBadge = (id) => {
     if (id === "submissions") return stats.total ?? null;
-    if (id === "flagged")     return stats.flaggedCount ?? null;
+    if (id === "flagged") return stats.flaggedCount ?? null;
     return null;
   };
 
+  const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED;
+
   return (
     <aside
-      className={`flex flex-shrink-0 flex-col bg-[#0F172A] text-white transition-all duration-200 ${
-        collapsed ? "w-16" : "w-60"
-      }`}
+      style={{ width }}
+      className="fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-[#e2e8f0] bg-white"
     >
-      {/* Brand */}
-      <div className="flex h-16 items-center gap-3 border-b border-white/10 px-4">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--brand)] text-sm font-bold text-white">
-          e
-        </div>
-        {!collapsed && (
-          <div className="min-w-0">
-            <p className="truncate text-xs font-semibold uppercase tracking-widest text-white/50">eKS</p>
-            <p className="truncate text-sm font-bold text-white">Admin Panel</p>
+      <div className="flex h-14 flex-shrink-0 items-center gap-2 border-b border-[#e2e8f0] px-3">
+        {!collapsed ? (
+          <div className="min-w-0 flex-1 [&_span]:text-lg">
+            <Logo />
           </div>
+        ) : (
+          <Link
+            href="/"
+            className="mx-auto flex h-8 w-8 items-center justify-center rounded-md bg-[#f0f9eb] text-sm font-bold text-[var(--brand)]"
+          >
+            e
+          </Link>
         )}
         <button
-          onClick={() => setCollapsed((v) => !v)}
-          className="ml-auto flex-shrink-0 text-white/40 transition hover:text-white"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          type="button"
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-[#64748b] hover:bg-[#f4f5f7]"
+          title={collapsed ? "Expand" : "Collapse"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? "›" : "‹"}
+          <span className="text-sm">{collapsed ? "»" : "«"}</span>
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex flex-col gap-1 overflow-y-auto py-4 px-2">
+      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {NAV_ITEMS.map((item) => {
           const isActive = activeTab === item.id;
           const badge = getBadge(item.id);
 
-          const cls = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+          const cls = `flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition ${
             isActive
-              ? "bg-[var(--brand)] text-white"
-              : "text-white/60 hover:bg-white/10 hover:text-white"
+              ? "border-l-2 border-[var(--brand)] bg-[#f0f9eb] pl-[10px] font-medium text-[#1a3d0d]"
+              : "border-l-2 border-transparent font-normal text-[#475569] hover:bg-[#f4f5f7]"
           }`;
 
-          const inner = (
+          const inner = collapsed ? (
+            <span className="mx-auto text-xs font-medium uppercase">{item.label[0]}</span>
+          ) : (
             <>
-              <span className="flex-shrink-0 text-base leading-none">{item.icon}</span>
-              {!collapsed && (
-                <>
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {badge !== null && (
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                        isActive ? "bg-white/20 text-white" : "bg-white/10 text-white/70"
-                      }`}
-                    >
-                      {badge}
-                    </span>
-                  )}
-                </>
+              <span className="flex-1 text-left">{item.label}</span>
+              {badge !== null && (
+                <span className="rounded bg-[#e2e8f0] px-1.5 py-0.5 text-[11px] font-medium text-[#475569]">
+                  {badge}
+                </span>
               )}
             </>
           );
 
           return onTabChange ? (
-            <button key={item.id} onClick={() => onTabChange(item.id)} className={cls}>
+            <button key={item.id} type="button" onClick={() => onTabChange(item.id)} className={cls} title={item.label}>
               {inner}
             </button>
           ) : (
-            <Link key={item.id} href={`/admin?tab=${item.id}`} className={cls}>
+            <Link key={item.id} href={`/admin?tab=${item.id}`} className={cls} title={item.label}>
               {inner}
             </Link>
           );
         })}
       </nav>
 
-      {/* Optional extra content slot (e.g. applicant info on the review detail page) */}
-      {children && (
-        <div className="border-t border-white/10 p-3">
-          {children}
-        </div>
+      {children && !collapsed && (
+        <div className="flex-shrink-0 border-t border-[#e2e8f0] p-3">{children}</div>
       )}
 
-      {/* User footer */}
-      <div className="mt-auto border-t border-white/10 p-3">
+      <div className="flex-shrink-0 border-t border-[#e2e8f0] p-2">
         {!collapsed ? (
-          <div className="flex items-center gap-3 rounded-xl px-2 py-2">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand)]">
-              A
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-semibold text-white">Administrator</p>
-              <p className="truncate text-xs text-white/40">admin@eks.com</p>
+          <div className="flex items-center justify-between gap-2 px-2 py-1">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-[#0f172a]">Admin</p>
+              <p className="truncate text-[11px] text-[#64748b]">admin@eks.com</p>
             </div>
             <button
+              type="button"
               onClick={onLogout}
-              title="Logout"
-              className="flex-shrink-0 text-white/40 transition hover:text-red-400 text-sm"
+              className="text-xs font-medium text-[#64748b] hover:text-[#0f172a]"
             >
-              ⏻
+              Sign out
             </button>
           </div>
         ) : (
           <button
+            type="button"
             onClick={onLogout}
-            title="Logout"
-            className="flex w-full items-center justify-center rounded-xl py-2 text-white/40 transition hover:text-red-400"
+            title="Sign out"
+            className="flex w-full justify-center py-2 text-[11px] text-[#64748b] hover:text-[#0f172a]"
           >
-            ⏻
+            Out
           </button>
         )}
       </div>

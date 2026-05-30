@@ -1,4 +1,5 @@
 const pool = require("./dbClient");
+const settingsService = require("./settingsService");
 const { uploadBuffer } = require("./cloudinaryService");
 const { compareTwoStrings } = require("string-similarity");
 const FormData = require("form-data");
@@ -7,6 +8,9 @@ const sharp = require("sharp");
 
 const ML_URL = process.env.ML_SERVICE_URL || "http://localhost:8000";
 const ML_TIMEOUT = 45000;
+
+/** Auto-reject floor (risk score 0–100); auto-approve uses low_risk_threshold from settings. */
+const AUTO_REJECT_MIN_SCORE = 80;
 
 class OnboardingService {
   /**
@@ -52,7 +56,29 @@ class OnboardingService {
   }
 
   /**
-   * Document (citizenship) number: verified_users = duplicate; others = count/risk only.
+   * Hard stop: citizenship / document number already belongs to an approved user.
+   */
+  async assertDocumentNotInVerifiedUsers(documentNumber) {
+    if (!documentNumber?.trim()) return;
+
+    const norm = this._normaliseDocNum(documentNumber);
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM verified_users
+       WHERE UPPER(REPLACE(REPLACE(REPLACE(document_number, ' ', ''), '-', ''), '.', '')) = $1`,
+      [norm]
+    );
+    if (parseInt(rows[0].cnt, 10) > 0) {
+      const err = new Error(
+        "Records found in our userbase for this citizenship number. You cannot continue with this ID."
+      );
+      err.code = "VERIFIED_USER_EXISTS";
+      throw err;
+    }
+  }
+
+  /**
+   * Document number risk: pending/session counts only (small bumps).
+   * Verified-user duplicate is handled by assertDocumentNotInVerifiedUsers (hard block).
    */
   async assessDocumentNumberRisk(documentNumber, sessionId = null) {
     const flags = {};
@@ -62,27 +88,17 @@ class OnboardingService {
     const docNum = documentNumber.trim().toUpperCase();
     const norm = this._normaliseDocNum(docNum);
 
-    const { rows: verifiedRows } = await pool.query(
-      `SELECT COUNT(*) AS cnt FROM verified_users
-       WHERE UPPER(REPLACE(REPLACE(REPLACE(document_number, ' ', ''), '-', ''), '.', '')) = $1`,
-      [norm]
-    );
-    if (parseInt(verifiedRows[0].cnt, 10) > 0) {
-      flags.verified_user_document_exists = true;
-      score += 50;
-    }
-
     const sessionCount = await this._countOnboardingSessions("document", norm, sessionId);
     if (sessionCount > 0) {
       flags.previous_document_attempts = sessionCount;
       flags.onboarding_session_doc_count = sessionCount;
-      score += Math.min(sessionCount * 5, 20);
+      score += Math.min(sessionCount * 2, 8);
     }
 
     const unofficialCount = await this._countExtractUnofficialDocNumber(docNum);
     if (unofficialCount > 0) {
       flags.extract_unofficial_doc_count = unofficialCount;
-      score += Math.min(unofficialCount * 3, 15);
+      score += Math.min(unofficialCount * 1, 5);
     }
 
     return { flags, score };
@@ -153,20 +169,22 @@ class OnboardingService {
       }
     }
 
-    // ── Device fingerprint checks ─────────────────────────────────────────────
+    // ── Device fingerprint checks (other sessions only — not the current one) ─
     if (deviceFingerprint) {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*) AS cnt
+      const deviceParams = [deviceFingerprint];
+      let deviceQuery = `SELECT COUNT(*) AS cnt
          FROM   onboarding_sessions
          WHERE  device_fingerprint = $1
-           AND  status NOT IN ('expired')`,
-        [deviceFingerprint]
-      );
+           AND  status NOT IN ('expired')`;
+      if (sessionId) {
+        deviceParams.push(sessionId);
+        deviceQuery += ` AND id != $${deviceParams.length}`;
+      }
+      const { rows } = await pool.query(deviceQuery, deviceParams);
       const prevDeviceAttempts = parseInt(rows[0].cnt, 10);
       if (prevDeviceAttempts > 0) {
         riskFlags.same_device_multiple_attempts = true;
         riskFlags.device_attempt_count = prevDeviceAttempts;
-        // Each previous attempt from this device adds risk, capped at 30
         riskScore += Math.min(prevDeviceAttempts * 15, 30);
       }
     }
@@ -356,9 +374,12 @@ class OnboardingService {
   /**
    * Send a single image buffer to FastAPI as multipart form-data.
    */
-  async _callMLWithBuffer(endpoint, buffer, filename = "document.jpg") {
+  async _callMLWithBuffer(endpoint, buffer, filename = "document.jpg", extraFields = {}) {
     const form = new FormData();
     form.append("image", buffer, { filename, contentType: "image/jpeg" });
+    for (const [key, val] of Object.entries(extraFields)) {
+      if (val != null) form.append(key, String(val));
+    }
     const response = await axios.post(`${ML_URL}${endpoint}`, form, {
       headers: form.getHeaders(),
       timeout: ML_TIMEOUT,
@@ -497,17 +518,9 @@ class OnboardingService {
     const existingRiskScore = session.risk_score || 0;
     const existingRiskFlags = session.risk_flags || {};
 
-    // ── 2. Upload images to Cloudinary ───────────────────────────────────────
+    // ── 2. Cloudinary uploads + ML (forgery, OCR, face) in parallel ─────────
     const folder = `kyc-documents/${sessionId}`;
 
-    const [documentUrl, documentBackUrl] = await Promise.all([
-      uploadBuffer(frontBuffer, { folder, publicId: `${sessionId}_front` }),
-      backBuffer
-        ? uploadBuffer(backBuffer, { folder, publicId: `${sessionId}_back` })
-        : Promise.resolve(null),
-    ]);
-
-    // ── 3. Run forgery + OCR + face-extract in parallel ─────────────────────
     let forgeryResult = null;
     let ocrResult = null;
     let docFaceExtraction = null;
@@ -518,9 +531,6 @@ class OnboardingService {
     let docDupFlags = {};
     let docDupScore = 0;
 
-    // For citizenship with a back image, use the dual-image OCR endpoint so
-    // the model can merge data from both sides (English names, DOB, AD dates
-    // from front; Nepali names, family details, BS dates from back).
     const isCitizenship =
       documentType && documentType.toLowerCase() === "citizenship";
     const ocrPromise =
@@ -528,11 +538,40 @@ class OnboardingService {
         ? this._callDualML("/api/v1/ocr/extract-citizenship", frontBuffer, backBuffer)
         : this._callMLWithBuffer("/api/v1/ocr/extract", frontBuffer, "front.jpg");
 
-    const [forgeryOutcome, ocrOutcome, faceExtractOutcome] = await Promise.allSettled([
+    const appSettings = await settingsService.getSettings();
+
+    const [
+      documentUrlOutcome,
+      documentBackUrlOutcome,
+      forgeryOutcome,
+      ocrOutcome,
+      faceExtractOutcome,
+    ] = await Promise.allSettled([
+      uploadBuffer(frontBuffer, { folder, publicId: `${sessionId}_front` }),
+      backBuffer
+        ? uploadBuffer(backBuffer, { folder, publicId: `${sessionId}_back` })
+        : Promise.resolve(null),
       this._callMLWithBuffer("/api/v1/forgery/verify", frontBuffer, "front.jpg"),
       ocrPromise,
-      this._callMLWithBuffer("/api/v1/face/extract", frontBuffer, "front.jpg"),
+      this._callMLWithBuffer("/api/v1/face/extract", frontBuffer, "front.jpg", {
+        similarity_threshold: appSettings.duplicate_face_threshold,
+      }),
     ]);
+
+    if (documentUrlOutcome.status === "rejected") {
+      throw documentUrlOutcome.reason || new Error("Document upload failed");
+    }
+    const documentUrl = documentUrlOutcome.value;
+    const documentBackUrl =
+      documentBackUrlOutcome.status === "fulfilled"
+        ? documentBackUrlOutcome.value
+        : null;
+    if (documentBackUrlOutcome.status === "rejected" && backBuffer) {
+      console.warn(
+        "[onboarding] Back image upload failed:",
+        documentBackUrlOutcome.reason?.message
+      );
+    }
 
     if (forgeryOutcome.status === "fulfilled") {
       forgeryResult = forgeryOutcome.value;
@@ -562,7 +601,7 @@ class OnboardingService {
       if (pendingCount > 0) {
         docDupFlags.pending_face_attempt_count = pendingCount;
         docDupFlags.onboarding_pending_face_count = pendingCount;
-        docDupScore += Math.min(pendingCount * 5, 20);
+        docDupScore += Math.min(pendingCount * 2, 8);
       }
     } else {
       console.warn("[onboarding] Face extract unavailable:", faceExtractOutcome.reason?.message);
@@ -594,9 +633,14 @@ class OnboardingService {
     const ocrName = this._extractOCRName(extractedFields);
     const ocrDocNumber = this._extractOCRDocNumber(extractedFields);
 
-    // ── 5b. Document number: verified_users duplicate + attempt counts ───────
-    if (documentNumber) {
-      const docRisk = await this.assessDocumentNumberRisk(documentNumber, sessionId);
+    const docToCheck = documentNumber || ocrDocNumber;
+    if (docToCheck) {
+      await this.assertDocumentNotInVerifiedUsers(docToCheck);
+    }
+
+    // ── 5b. Document number: pending attempt counts only (small risk bumps) ──
+    if (docToCheck) {
+      const docRisk = await this.assessDocumentNumberRisk(docToCheck, sessionId);
       docDupFlags = { ...docDupFlags, ...docRisk.flags };
       docDupScore += docRisk.score;
     }
@@ -730,10 +774,16 @@ class OnboardingService {
    * Call FastAPI /face/compare with a selfie buffer + stored document submission_id.
    * Returns { similarity_score, is_match, face_found } or null on service failure.
    */
-  async _compareFaceToDocument(selfieBuffer, kycSubmissionId, filename = "selfie.jpg") {
+  async _compareFaceToDocument(
+    selfieBuffer,
+    kycSubmissionId,
+    filename = "selfie.jpg",
+    matchThreshold = 0.65
+  ) {
     const form = new FormData();
     form.append("selfie_image", selfieBuffer, { filename, contentType: "image/jpeg" });
     form.append("submission_id", kycSubmissionId);
+    form.append("match_threshold", String(matchThreshold));
     try {
       const response = await axios.post(`${ML_URL}/api/v1/face/compare`, form, {
         headers: form.getHeaders(),
@@ -758,7 +808,14 @@ class OnboardingService {
    * @returns {{ selfieUrl, faceSimilarity, isMatch, riskFlags, riskScore }}
    */
   async processSelfie(sessionId, payload) {
-    const { frontBuffer, leftBuffer, rightBuffer } = payload;
+    const {
+      frontBuffer,
+      leftBuffer,
+      rightBuffer,
+      livenessIsLive = null,
+      livenessDecision = null,
+      livenessConfidence = null,
+    } = payload;
 
     const session = await this.getSession(sessionId);
     if (!session) throw new Error("Session not found");
@@ -784,11 +841,16 @@ class OnboardingService {
     let faceSimilarity = null;
     let faceFound = false;
 
+    const appSettings = await settingsService.getSettings();
+    const matchThreshold = appSettings.face_match_threshold;
+    const uncertainThreshold = Math.max(matchThreshold - 0.15, 0.35);
+
     if (kycSubmissionId) {
       const compareResult = await this._compareFaceToDocument(
         frontBuffer,
         kycSubmissionId,
-        "selfie_front.jpg"
+        "selfie_front.jpg",
+        matchThreshold
       );
       if (compareResult) {
         faceSimilarity = compareResult.similarity_score ?? null;
@@ -805,14 +867,13 @@ class OnboardingService {
     if (faceSimilarity !== null) {
       addedFlags.face_similarity = faceSimilarity;
 
-      if (faceSimilarity < 0.50) {
+      if (faceSimilarity < uncertainThreshold) {
         addedFlags.face_mismatch = true;
         addedScore += 50;
-      } else if (faceSimilarity < 0.65) {
+      } else if (faceSimilarity < matchThreshold) {
         addedFlags.face_uncertain = true;
         addedScore += 20;
       }
-      // similarity >= 0.65 is a good match — no extra risk
     } else if (!kycSubmissionId) {
       addedFlags.face_comparison_skipped = true;
     } else if (!faceFound) {
@@ -822,9 +883,19 @@ class OnboardingService {
 
     // Liveness bonus: all 3 angles captured → slight risk reduction
     const hasAllAngles = Boolean(frontBuffer) && Boolean(leftBuffer) && Boolean(rightBuffer);
-    if (hasAllAngles && faceSimilarity !== null && faceSimilarity >= 0.50) {
+    if (hasAllAngles && faceSimilarity !== null && faceSimilarity >= uncertainThreshold) {
       addedScore -= 5; // liveness confirmed
       addedFlags.liveness_confirmed = true;
+    }
+
+    if (livenessIsLive === false) {
+      addedFlags.liveness_failed = true;
+      addedFlags.liveness_decision = livenessDecision || "SPOOF";
+      if (livenessConfidence != null) {
+        addedFlags.liveness_confidence = livenessConfidence;
+      }
+    } else if (livenessIsLive === true && livenessConfidence != null) {
+      addedFlags.liveness_confidence = livenessConfidence;
     }
 
     const newRiskScore = Math.min(Math.max(Math.round(existingRiskScore + addedScore), 0), 100);
@@ -852,12 +923,187 @@ class OnboardingService {
       ]
     );
 
+    let decision;
+    if (livenessIsLive === false) {
+      decision = {
+        outcome: "pending",
+        status: "submitted",
+        userMessage:
+          "Your photos were saved, but liveness verification did not pass. Our team will review your application.",
+        userReason: null,
+      };
+    } else {
+      decision = await this.applyAutoDecision(
+        sessionId,
+        newRiskScore,
+        mergedRiskFlags
+      );
+    }
+
     return {
       selfieUrl,
       faceSimilarity,
-      isMatch: faceSimilarity !== null ? faceSimilarity >= 0.65 : null,
+      isMatch: faceSimilarity !== null ? faceSimilarity >= matchThreshold : null,
       riskFlags: mergedRiskFlags,
       riskScore: newRiskScore,
+      ...decision,
+    };
+  }
+
+  /**
+   * Plain-language rejection reason for the applicant (short, no jargon).
+   */
+  buildRejectionMessage(riskFlags = {}) {
+    if (riskFlags.verified_user_document_exists) {
+      return "This citizenship or ID number is already registered in our system.";
+    }
+    if (riskFlags.verified_face_exists) {
+      return "This face is already linked to another verified account.";
+    }
+    if (riskFlags.face_mismatch) {
+      return "Your selfie did not match the photo on your document.";
+    }
+    if (riskFlags.forgery_detected) {
+      return "Your document could not be verified as authentic.";
+    }
+    if (riskFlags.forgery_suspicious) {
+      return "Your document raised authenticity concerns we could not clear automatically.";
+    }
+    if (riskFlags.name_mismatch) {
+      return "The name you entered does not match your document.";
+    }
+    if (riskFlags.document_number_mismatch) {
+      return "The ID number you entered does not match your document.";
+    }
+    if (riskFlags.edited_name_mismatch || riskFlags.drastic_ocr_edit) {
+      return "The details you entered differ too much from your document.";
+    }
+    if (riskFlags.bot_speed_suspected) {
+      return "The application was completed too quickly to verify safely.";
+    }
+    return "Your application did not pass our automatic security checks.";
+  }
+
+  /**
+   * Approve session and copy identity into verified_users (same as admin approve).
+   */
+  async approveSession(sessionId, reviewedBy = "system") {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `SELECT * FROM onboarding_sessions WHERE id = $1`,
+        [sessionId]
+      );
+      if (!rows.length) throw new Error("Session not found");
+      const s = rows[0];
+
+      await client.query(
+        `INSERT INTO verified_users (
+           session_id, full_name, dob, gender, nationality,
+           email, phone_number, pan_number, occupation,
+           document_type, document_number,
+           approved_at, approved_by
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, $9,
+           $10, $11,
+           now(), $12
+         )
+         ON CONFLICT DO NOTHING`,
+        [
+          s.id,
+          s.full_name,
+          s.dob,
+          s.gender,
+          s.nationality,
+          s.email,
+          s.phone_number,
+          s.pan_number,
+          s.occupation,
+          s.document_type,
+          s.document_number,
+          reviewedBy,
+        ]
+      );
+
+      await client.query(
+        `UPDATE onboarding_sessions SET status = 'approved' WHERE id = $1`,
+        [sessionId]
+      );
+
+      if (s.kyc_submission_id) {
+        await client.query(
+          `UPDATE face_embeddings SET is_verified = true WHERE submission_id = $1`,
+          [s.kyc_submission_id]
+        );
+      }
+
+      await client.query("COMMIT");
+      return { status: "approved" };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Reject session with a stored reason for the applicant.
+   */
+  async rejectSession(sessionId, reason, reviewedBy = "system") {
+    const { rowCount } = await pool.query(
+      `UPDATE onboarding_sessions
+       SET    status     = 'rejected',
+              risk_flags = risk_flags || jsonb_build_object(
+                             'rejection_reason', $1::text,
+                             'rejected_by',      $2::text,
+                             'rejected_at',      now()::text,
+                             'auto_rejected',    true
+                           )
+       WHERE  id = $3`,
+      [reason, reviewedBy, sessionId]
+    );
+    if (!rowCount) throw new Error("Session not found");
+    return { status: "rejected", reason };
+  }
+
+  /**
+   * After final risk score: auto-approve (≤ low threshold), auto-reject (≥80), else pending.
+   */
+  async applyAutoDecision(sessionId, riskScore, riskFlags = {}) {
+    const score = Math.round(Number(riskScore) || 0);
+    const { low_risk_threshold: lowMax = 40 } = await settingsService.getSettings();
+
+    if (score <= lowMax) {
+      await this.approveSession(sessionId, "auto-verify");
+      return {
+        outcome: "approved",
+        status: "approved",
+        userMessage:
+          "Your identity has been verified. Your application is approved.",
+        userReason: null,
+      };
+    }
+
+    if (score >= AUTO_REJECT_MIN_SCORE) {
+      const userReason = this.buildRejectionMessage(riskFlags);
+      await this.rejectSession(sessionId, userReason, "auto-verify");
+      return {
+        outcome: "rejected",
+        status: "rejected",
+        userMessage: "We could not approve your application.",
+        userReason,
+      };
+    }
+
+    return {
+      outcome: "pending",
+      status: "submitted",
+      userMessage:
+        "Your application was submitted successfully. Our team will review it shortly.",
+      userReason: null,
     };
   }
 
@@ -943,9 +1189,15 @@ class OnboardingService {
     const spouseVal = str(f.spouse_name_english || f.spouse_name_nepali);
     if (!spouseVal) maritalStatus = "Single";
 
+    const slashDate = (raw) => {
+      const v = str(raw);
+      if (!v) return "";
+      return v.replace(/-/g, "/");
+    };
+
     const prefill = {
       fullName: str(f.full_name_english || f.full_name || f.full_name_nepali),
-      dob: str(f.date_of_birth_ad),
+      dob: slashDate(f.date_of_birth_ad),
       gender: cap(f.gender),
       nationality: ocrResult?.document_type === "citizenship"
         ? "Nepali"
@@ -972,8 +1224,8 @@ class OnboardingService {
       documentNumber: str(
         f.citizenship_number || f.dl_number || f.nin || f.document_number
       ),
-      documentIssuedDate: str(
-        f.issued_date_ad || f.date_of_issue || f.issued_date_bs
+      documentIssuedDate: slashDate(
+        f.issued_date_bs || f.issued_date_ad || f.date_of_issue
       ),
       documentIssuedPlace: str(
         f.issued_district_english || f.issued_district
@@ -1022,8 +1274,9 @@ class OnboardingService {
     }
 
     // ── Date of birth (exact AD date) ────────────────────────────────────
-    const ocrDob = clean(f.date_of_birth_ad);
-    const userDob = clean(formData.dob);
+    const normDate = (v) => clean(v).replace(/\//g, "-");
+    const ocrDob = normDate(f.date_of_birth_ad);
+    const userDob = normDate(formData.dob);
     if (ocrDob && userDob && ocrDob !== userDob) {
       flags.edited_dob_mismatch = true;
       flags.ocr_dob = ocrDob;
@@ -1174,6 +1427,10 @@ class OnboardingService {
     const session = await this.getSession(sessionId);
     if (!session) throw new Error("Session not found");
 
+    if (formData.documentNumber) {
+      await this.assertDocumentNotInVerifiedUsers(formData.documentNumber);
+    }
+
     const existingRiskScore = session.risk_score || 0;
     const existingRiskFlags = session.risk_flags || {};
 
@@ -1240,7 +1497,7 @@ class OnboardingService {
        WHERE id = $31`,
       [
         (formData.fullName || "").trim(),
-        formData.dob || null,
+        formData.dob ? String(formData.dob).trim().replace(/\//g, "-") : null,
         formData.gender || null,
         formData.nationality || null,
         formData.familySide || null,
@@ -1264,7 +1521,9 @@ class OnboardingService {
         pick(formData.permanentWard, formData.currentWard) || null,
         pick(formData.permanentStreet, formData.currentStreet) || null,
         formData.documentNumber?.trim() || null,
-        formData.documentIssuedDate?.trim() || null,
+        formData.documentIssuedDate
+          ? String(formData.documentIssuedDate).trim().replace(/\//g, "-")
+          : null,
         formData.documentIssuedPlace?.trim() || null,
         formData.documentType || session.document_type || null,
         newRiskScore,

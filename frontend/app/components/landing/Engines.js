@@ -10,9 +10,9 @@ export default function Engines() {
     <section id="engines" className="relative py-24">
       <div className="mx-auto max-w-6xl px-5 sm:px-6">
         <SectionHeading
-          eyebrow="Engines"
-          title="Specialized signals working in concert"
-          subtitle="Each engine adds a unique signal to build a complete fraud profile."
+          eyebrow="Backend services"
+          title="Three ML + risk pipelines"
+          subtitle="Express orchestrates Cloudinary storage, FastAPI forgery/OCR/face/liveness, and Postgres sessions."
         />
 
         <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">

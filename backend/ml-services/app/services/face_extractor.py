@@ -131,6 +131,7 @@ def _to_vector_literal(embedding: np.ndarray) -> str:
 
 async def _find_duplicate_via_supabase(
     embedding: np.ndarray,
+    similarity_threshold: float | None = None,
 ) -> Optional[DuplicateMatch]:
     """Supabase REST fallback for verified-only duplicate detection via the
     ``match_verified_face_embeddings`` RPC function (see migration 008).
@@ -139,6 +140,11 @@ async def _find_duplicate_via_supabase(
     set).  Returns ``None`` on any error so the caller can treat it as "no
     duplicate found".
     """
+    threshold = (
+        similarity_threshold
+        if similarity_threshold is not None
+        else settings.DUPLICATE_SIMILARITY_THRESHOLD
+    )
     client = supabase_client.supabase
     if client is None:
         logger.warning("Supabase client not configured; cannot run RPC fallback.")
@@ -150,7 +156,7 @@ async def _find_duplicate_via_supabase(
             "match_verified_face_embeddings",
             {
                 "query_embedding": vector_list,
-                "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                "similarity_threshold": threshold,
                 "match_count": 1,
             },
         ),
@@ -158,7 +164,7 @@ async def _find_duplicate_via_supabase(
             "match_face_embeddings",
             {
                 "query_embedding": vector_list,
-                "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                "similarity_threshold": threshold,
                 "match_count": 1,
             },
         ),
@@ -193,6 +199,7 @@ async def _find_duplicate_via_supabase(
 
 async def _find_duplicate(
     embedding: np.ndarray,
+    similarity_threshold: float | None = None,
 ) -> Optional[DuplicateMatch]:
     """Search for the nearest VERIFIED face via pgvector cosine similarity.
 
@@ -204,6 +211,11 @@ async def _find_duplicate(
     Supabase REST RPC when the pool is unavailable.  Returns ``None`` when no
     match exceeds the threshold or on any unrecoverable error.
     """
+    threshold = (
+        similarity_threshold
+        if similarity_threshold is not None
+        else settings.DUPLICATE_SIMILARITY_THRESHOLD
+    )
     vector_literal = _to_vector_literal(embedding)
     verified_query = """
         SELECT submission_id, created_at,
@@ -238,16 +250,16 @@ async def _find_duplicate(
         logger.warning(
             "DB pool unavailable; falling back to Supabase RPC for verified-face detection."
         )
-        return await _find_duplicate_via_supabase(embedding)
+        return await _find_duplicate_via_supabase(embedding, threshold)
     except Exception:  # noqa: BLE001 - try the fallback rather than giving up
         logger.warning("asyncpg verified-face detection failed; trying Supabase RPC")
-        return await _find_duplicate_via_supabase(embedding)
+        return await _find_duplicate_via_supabase(embedding, threshold)
 
     if row is None:
         return None
 
     similarity = float(row["similarity"])
-    if similarity > settings.DUPLICATE_SIMILARITY_THRESHOLD:
+    if similarity > threshold:
         return DuplicateMatch(
             matched_submission_id=str(row["submission_id"]),
             similarity_score=round(similarity, 4),
@@ -256,7 +268,10 @@ async def _find_duplicate(
     return None
 
 
-async def _count_pending_duplicates(embedding: np.ndarray) -> int:
+async def _count_pending_duplicates(
+    embedding: np.ndarray,
+    similarity_threshold: float | None = None,
+) -> int:
     """Count unverified submissions whose face is similar to ``embedding``.
 
     These are pending sessions that haven't been approved yet.  We do NOT
@@ -264,6 +279,11 @@ async def _count_pending_duplicates(embedding: np.ndarray) -> int:
     layer can silently inflate the risk score and surface it only in the admin
     panel.
     """
+    threshold = (
+        similarity_threshold
+        if similarity_threshold is not None
+        else settings.DUPLICATE_SIMILARITY_THRESHOLD
+    )
     vector_literal = _to_vector_literal(embedding)
     verified_query = """
         SELECT COUNT(*) AS cnt
@@ -276,7 +296,7 @@ async def _count_pending_duplicates(embedding: np.ndarray) -> int:
         async with pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
-                    verified_query, vector_literal, settings.DUPLICATE_SIMILARITY_THRESHOLD
+                    verified_query, vector_literal, threshold
                 )
             except Exception as exc:  # noqa: BLE001
                 if "is_verified" in str(exc):
@@ -299,7 +319,7 @@ async def _count_pending_duplicates(embedding: np.ndarray) -> int:
                         rpc_name,
                         {
                             "query_embedding": embedding.tolist(),
-                            "similarity_threshold": settings.DUPLICATE_SIMILARITY_THRESHOLD,
+                            "similarity_threshold": threshold,
                         },
                     ).execute()
                     return int(resp.data) if resp.data is not None else 0
@@ -362,6 +382,7 @@ def _persist_to_supabase(
 async def extract_and_save_face(
     image_bytes: bytes,
     submission_id: str | None = None,
+    similarity_threshold: float | None = None,
 ) -> FaceExtractionResult:
     """Detect, embed, deduplicate and persist a face from an ID image.
 
@@ -447,9 +468,11 @@ async def extract_and_save_face(
                 logger.exception("Cloudinary upload of face crop failed")
 
         # Step 9: duplicate detection — verified faces only.
-        duplicate_match = await _find_duplicate(embedding)
+        duplicate_match = await _find_duplicate(embedding, similarity_threshold)
         # Count pending (unverified) near-matches for the silent risk signal.
-        pending_duplicate_count = await _count_pending_duplicates(embedding)
+        pending_duplicate_count = await _count_pending_duplicates(
+            embedding, similarity_threshold
+        )
 
         # Steps 10-11: persist submission + embedding (non-fatal on failure).
         embedding_saved = False

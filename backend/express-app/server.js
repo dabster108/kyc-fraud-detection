@@ -70,9 +70,12 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server (long timeout for document OCR + ML pipeline)
+const server = app.listen(PORT, () => {
   console.log(` Express backend running on http://localhost:${PORT}`);
   console.log(` Health check: http://localhost:${PORT}/health`);
   console.log(` Environment: ${process.env.NODE_ENV || "development"}`);
 });
+server.timeout = 180_000;
+server.keepAliveTimeout = 180_000;
+server.headersTimeout = 185_000;

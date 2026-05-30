@@ -13,12 +13,22 @@ import {
 } from "../../components/icons";
 import {
   fetchSubmissionById,
+  fetchSettings,
   approveSubmission,
   rejectSubmission,
 } from "../../../lib/adminApi";
 import AdminSidebar from "../AdminSidebar";
+import AdminShell from "../AdminShell";
 
 const AUTH_KEY = "adminAuthed";
+
+function selfieByAngle(submission) {
+  return {
+    front: submission?.faceCaptures?.front || submission?.selfieUrl || null,
+    left: submission?.faceCaptures?.left || submission?.selfieLeftUrl || null,
+    right: submission?.faceCaptures?.right || submission?.selfieRightUrl || null,
+  };
+}
 
 // ─── Risk flag metadata ──────────────────────────────────────────────────────
 const FLAG_META = {
@@ -46,7 +56,8 @@ const FLAG_META = {
   onboarding_session_phone_count: { label: "Session Phone Count",       severity: "info",     desc: "Phone reuse count in onboarding_sessions." },
   previous_pan_attempts:       { label: "Prior PAN Attempts",            severity: "info",     desc: "Prior onboarding sessions with this PAN." },
   onboarding_session_pan_count: { label: "Session PAN Count",            severity: "info",     desc: "PAN reuse count in onboarding_sessions." },
-  same_device_multiple_attempts: { label: "Multi-Attempt Device",        severity: "medium",   desc: "Multiple KYC submissions detected from the same device fingerprint." },
+  same_device_multiple_attempts: { label: "Multi-Attempt Device",        severity: "medium",   desc: "Another onboarding session (not this one) used the same device fingerprint." },
+  device_attempt_count:          { label: "Prior Sessions (Same Device)", severity: "info",     desc: "Number of other onboarding_sessions rows with this device fingerprint." },
   device_attempt_count:        { label: "Device Attempt Count",          severity: "info",     desc: "Total previous KYC submissions from this specific device." },
   multiple_accounts_same_ip:   { label: "Multiple IP Accounts",          severity: "high",     desc: "Several distinct accounts submitted KYC from this IP within 24 hours.", impact: "+20 pts" },
   ip_account_count:            { label: "IP Account Count",              severity: "info",     desc: "Number of unique accounts seen from this IP address today." },
@@ -76,11 +87,16 @@ const STATUS_COLORS = {
   Rejected: "bg-red-100 text-red-700 border-red-200",
 };
 
-const getRiskTone = (score) => {
-  if (score >= 70) return { label: "High Risk",      pill: "bg-red-100 text-red-700",       color: "#EF4444", track: "#FEE2E2" };
-  if (score >= 40) return { label: "Moderate Risk",  pill: "bg-amber-100 text-amber-700",   color: "#F59E0B", track: "#FEF3C7" };
-  return              { label: "Low Risk",       pill: "bg-emerald-100 text-emerald-700", color: "#22C55E", track: "#DCFCE7" };
-};
+const getRiskTone = (score, lowRisk = 40, highRisk = 70, faceMatch = 0.65) => ({
+  lowRisk,
+  highRisk,
+  faceMatch,
+  ...(score >= highRisk
+    ? { label: "High Risk", pill: "bg-red-100 text-red-700", color: "#EF4444", track: "#FEE2E2" }
+    : score > lowRisk
+      ? { label: "Moderate Risk", pill: "bg-amber-100 text-amber-700", color: "#F59E0B", track: "#FEF3C7" }
+      : { label: "Low Risk", pill: "bg-emerald-100 text-emerald-700", color: "#22C55E", track: "#DCFCE7" }),
+});
 
 function InfoRow({ label, value }) {
   if (!value && value !== 0) return null;
@@ -140,6 +156,11 @@ export default function SubmissionDetailPage() {
   const [submission, setSubmission] = useState(null);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [appSettings, setAppSettings] = useState({
+    lowRiskThreshold: 40,
+    highRiskThreshold: 70,
+    faceMatchThreshold: 0.65,
+  });
   const [actionMsg, setActionMsg] = useState("");
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -148,9 +169,13 @@ export default function SubmissionDetailPage() {
     let cancelled = false;
     (async () => {
       try {
-        const row = await fetchSubmissionById(submissionId);
+        const [row, settings] = await Promise.all([
+          fetchSubmissionById(submissionId),
+          fetchSettings().catch(() => null),
+        ]);
         if (!cancelled) {
           setSubmission(row);
+          if (settings) setAppSettings(settings);
           setLoadError("");
         }
       } catch (err) {
@@ -167,7 +192,18 @@ export default function SubmissionDetailPage() {
     };
   }, [submissionId]);
 
-  const risk = useMemo(() => getRiskTone(submission?.riskScore || 0), [submission]);
+  const risk = useMemo(
+    () =>
+      getRiskTone(
+        submission?.riskScore || 0,
+        appSettings.lowRiskThreshold,
+        appSettings.highRiskThreshold,
+        appSettings.faceMatchThreshold
+      ),
+    [submission, appSettings]
+  );
+
+  const selfies = useMemo(() => selfieByAngle(submission), [submission]);
 
   const handleLogout = () => {
     if (typeof window !== "undefined") window.sessionStorage.removeItem(AUTH_KEY);
@@ -210,17 +246,19 @@ export default function SubmissionDetailPage() {
 
   if (!hasLoaded) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F1F5F9]">
-        <p className="text-sm text-[#94A3B8]">Loading…</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-[var(--muted)]">Loading…</p>
       </div>
     );
   }
 
   if (!submission) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F1F5F9]">
-        <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
-          <h1 className="text-xl font-bold text-[#0B1324]">Submission not found</h1>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="glass rounded-2xl border border-[var(--soft-border)] bg-white p-10 text-center shadow-soft">
+          <h1 className="font-display text-3xl font-bold text-[#0B1324]">
+            Submission not found
+          </h1>
           <p className="mt-2 text-sm text-[#64748B]">
             {loadError || "The KYC submission could not be located in the database."}
           </p>
@@ -246,64 +284,59 @@ export default function SubmissionDetailPage() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-[#F1F5F9]">
-      <AdminSidebar
-        activeTab="submissions"
-        onLogout={handleLogout}
-        stats={{ total: 0, flaggedCount: 0 }}
-      >
-        {/* Applicant quick-info pinned in the sidebar */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-2 py-1">
-            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand)]">
-              {submission.name?.split(" ").map((p) => p[0]).slice(0, 2).join("")}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-white">{submission.name}</p>
-              <p className="truncate text-[10px] text-white/40">{submission.id}</p>
-            </div>
+    <AdminShell
+      sidebar={({ collapsed, onCollapsedChange }) => (
+        <AdminSidebar
+          activeTab="submissions"
+          onLogout={handleLogout}
+          stats={{ total: 0, flaggedCount: 0 }}
+          collapsed={collapsed}
+          onCollapsedChange={onCollapsedChange}
+        >
+          <div className="space-y-2 text-xs">
+            <p className="font-medium text-[#0f172a]">{submission.name}</p>
+            <p className="text-[#64748b]">{submission.documentNumber || submission.id}</p>
+            <p className={`inline-block rounded px-2 py-0.5 font-medium ${STATUS_COLORS[submission.status] || "bg-gray-100 text-gray-600"}`}>
+              {submission.status}
+            </p>
           </div>
-          <div className={`rounded-lg px-2 py-1 text-center text-xs font-semibold ${STATUS_COLORS[submission.status] || "bg-gray-100 text-gray-600"}`}>
-            {submission.status}
-          </div>
-        </div>
-      </AdminSidebar>
-
-      {/* Main */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Top bar */}
-        <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-[#E2E8F0] bg-white px-6">
-          <Link href="/admin" className="flex items-center gap-2 text-sm font-semibold text-[#64748B] hover:text-[#0B1324]">
-            <ChevronLeftIcon className="h-4 w-4" /> All Submissions
+        </AdminSidebar>
+      )}
+      header={
+        <>
+        <header className="flex h-14 flex-shrink-0 items-center justify-between gap-4 border-b border-[#e2e8f0] bg-white px-6">
+          <Link href="/admin" className="flex items-center gap-2 text-sm text-[#475569] hover:text-[#0f172a]">
+            <ChevronLeftIcon className="h-4 w-4" /> Submissions
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {actionMsg && (
-              <span className="rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">✓ {actionMsg}</span>
+              <span className="text-xs text-[#15803d]">{actionMsg}</span>
             )}
-            <button onClick={() => handleAction("Approved")} disabled={submission.status === "Approved"}
-              className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed">
-              ✓ Approve
+            <button type="button" onClick={() => handleAction("Approved")} disabled={submission.status === "Approved"}
+              className="rounded-md border border-[#bbf7d0] bg-[#f0fdf4] px-3 py-1.5 text-xs font-medium text-[#166534] hover:bg-[#dcfce7] disabled:opacity-40">
+              Approve
             </button>
-            <button onClick={() => handleAction("Flagged")} disabled={submission.status === "Flagged"}
-              className="rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed">
-              ⚑ Flag
+            <button type="button" onClick={() => handleAction("Flagged")} disabled={submission.status === "Flagged"}
+              className="rounded-md border border-[#fde68a] bg-[#fffbeb] px-3 py-1.5 text-xs font-medium text-[#92400e] hover:bg-[#fef3c7] disabled:opacity-40">
+              Flag
             </button>
-            <button onClick={() => handleAction("Rejected")} disabled={submission.status === "Rejected"}
-              className="rounded-xl bg-red-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed">
-              ✕ Reject
+            <button type="button" onClick={() => handleAction("Rejected")} disabled={submission.status === "Rejected"}
+              className="rounded-md border border-[#fecaca] bg-[#fef2f2] px-3 py-1.5 text-xs font-medium text-[#991b1b] hover:bg-[#fee2e2] disabled:opacity-40">
+              Reject
             </button>
           </div>
         </header>
 
-        {/* Applicant identity bar */}
-        <div className="border-b border-[#E2E8F0] bg-white px-6 py-4">
+        <div className="flex-shrink-0 border-b border-[#e2e8f0] bg-white px-6 py-4">
           <div className="flex flex-wrap items-center gap-4">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--brand)] to-emerald-700 text-lg font-bold text-white shadow">
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[#f0f9eb] text-sm font-semibold text-[var(--brand)]">
               {submission.name?.split(" ").map((p) => p[0]).slice(0, 2).join("")}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-bold text-[#0B1324]">{submission.name}</h1>
+                <h1 className="font-display text-2xl font-bold text-[#0B1324]">
+                  {submission.name}
+                </h1>
                 <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${risk.pill}`}>{risk.label}</span>
                 <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLORS[submission.status] || ""}`}>{submission.status}</span>
               </div>
@@ -329,24 +362,26 @@ export default function SubmissionDetailPage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 overflow-x-auto border-b border-[#E2E8F0] bg-white px-6">
+        <div className="flex flex-shrink-0 gap-0 overflow-x-auto border-b border-[#e2e8f0] bg-white px-6">
           {TABS.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveSection(tab.id)}
-              className={`flex-shrink-0 border-b-2 px-4 py-3 text-xs font-semibold transition ${
+              className={`flex-shrink-0 border-b-2 px-4 py-3 text-sm transition ${
                 activeSection === tab.id
-                  ? "border-[var(--brand)] text-[var(--brand)]"
-                  : "border-transparent text-[#64748B] hover:text-[#0B1324]"
+                  ? "border-[var(--brand)] font-medium text-[var(--brand)]"
+                  : "border-transparent font-normal text-[#64748b] hover:text-[#0f172a]"
               }`}
             >
               {tab.label}
             </button>
           ))}
         </div>
-
-        <main className="flex-1 overflow-y-auto p-6">
+        </>
+      }
+    >
+      <div className="p-6">
           {/* ── OVERVIEW ── */}
           {activeSection === "overview" && (
             <div className="grid gap-5 lg:grid-cols-2">
@@ -363,9 +398,21 @@ export default function SubmissionDetailPage() {
                   </div>
                   <div className="w-full space-y-2">
                     {[
-                      { label: "Low (0–39)",      range: [0,39],  color: "bg-emerald-400" },
-                      { label: "Moderate (40–69)", range: [40,69], color: "bg-amber-400"   },
-                      { label: "High (70–100)",    range: [70,100],color: "bg-red-500"     },
+                      {
+                        label: `Low (0–${risk.lowRisk})`,
+                        range: [0, risk.lowRisk],
+                        color: "bg-emerald-400",
+                      },
+                      {
+                        label: `Moderate (${risk.lowRisk + 1}–${risk.highRisk})`,
+                        range: [risk.lowRisk + 1, risk.highRisk],
+                        color: "bg-amber-400",
+                      },
+                      {
+                        label: `High (${risk.highRisk + 1}–100)`,
+                        range: [risk.highRisk + 1, 100],
+                        color: "bg-red-500",
+                      },
                     ].map((band) => (
                       <div key={band.label} className="flex items-center gap-2 text-xs">
                         <span className={`h-2 w-2 flex-shrink-0 rounded-full ${band.color}`} />
@@ -437,13 +484,13 @@ export default function SubmissionDetailPage() {
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-[#64748B]">Similarity Score</span>
-                        <span className={`text-2xl font-bold ${submission.faceSimilarity >= 0.65 ? "text-emerald-600" : submission.faceSimilarity >= 0.5 ? "text-amber-600" : "text-red-600"}`}>
+                        <span className={`text-2xl font-bold ${submission.faceSimilarity >= risk.faceMatch ? "text-emerald-600" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "text-amber-600" : "text-red-600"}`}>
                           {(submission.faceSimilarity * 100).toFixed(1)}%
                         </span>
                       </div>
                       <div className="h-3 rounded-full bg-[#F1F5F9]">
                         <div
-                          className={`h-3 rounded-full transition-all ${submission.faceSimilarity >= 0.65 ? "bg-emerald-500" : submission.faceSimilarity >= 0.5 ? "bg-amber-400" : "bg-red-500"}`}
+                          className={`h-3 rounded-full transition-all ${submission.faceSimilarity >= risk.faceMatch ? "bg-emerald-500" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "bg-amber-400" : "bg-red-500"}`}
                           style={{ width: `${submission.faceSimilarity * 100}%` }}
                         />
                       </div>
@@ -864,8 +911,19 @@ export default function SubmissionDetailPage() {
                     {["front", "left", "right"].map((angle) => (
                       <div key={angle} className="flex flex-col items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2">
                         <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-lg bg-white">
-                          {submission.faceCaptures?.[angle] ? (
-                            <img src={submission.faceCaptures[angle]} alt={`${angle} selfie`} className="h-full w-full object-cover" />
+                          {selfies[angle] ? (
+                            <a
+                              href={selfies[angle]}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="h-full w-full"
+                            >
+                              <img
+                                src={selfies[angle]}
+                                alt={`${angle} selfie`}
+                                className="h-full w-full object-cover"
+                              />
+                            </a>
                           ) : (
                             <span className="text-[10px] text-[#CBD5E1]">—</span>
                           )}
@@ -874,11 +932,27 @@ export default function SubmissionDetailPage() {
                       </div>
                     ))}
                   </div>
-                  {submission.selfieUrl && (
-                    <a href={submission.selfieUrl} target="_blank" rel="noreferrer"
-                      className="mt-2 block text-xs font-semibold text-[var(--brand)] hover:underline">
-                      View uploaded selfie on Cloudinary ↗
-                    </a>
+                  {(selfies.front || selfies.left || selfies.right) && (
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      {selfies.front && (
+                        <a href={selfies.front} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Front on Cloudinary ↗
+                        </a>
+                      )}
+                      {selfies.left && (
+                        <a href={selfies.left} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Left on Cloudinary ↗
+                        </a>
+                      )}
+                      {selfies.right && (
+                        <a href={selfies.right} target="_blank" rel="noreferrer"
+                          className="text-xs font-semibold text-[var(--brand)] hover:underline">
+                          Right on Cloudinary ↗
+                        </a>
+                      )}
+                    </div>
                   )}
                   {submission.faceVideoUrl && (
                     <div className="mt-3">
@@ -907,7 +981,7 @@ export default function SubmissionDetailPage() {
                       </div>
                       <div className="h-4 rounded-full bg-[#F1F5F9] relative">
                         <div
-                          className={`h-4 rounded-full transition-all ${submission.faceSimilarity >= 0.65 ? "bg-emerald-500" : submission.faceSimilarity >= 0.5 ? "bg-amber-400" : "bg-red-500"}`}
+                          className={`h-4 rounded-full transition-all ${submission.faceSimilarity >= risk.faceMatch ? "bg-emerald-500" : submission.faceSimilarity >= risk.faceMatch - 0.15 ? "bg-amber-400" : "bg-red-500"}`}
                           style={{ width: `${submission.faceSimilarity * 100}%` }}
                         />
                         {/* Threshold line at 65% */}
@@ -917,7 +991,7 @@ export default function SubmissionDetailPage() {
                       <div className="rounded-xl bg-[#F8FAFC] p-4 space-y-1 text-xs">
                         <p><span className="text-[#94A3B8]">Raw value: </span><span className="font-mono font-semibold text-[#0B1324]">{submission.faceSimilarity}</span></p>
                         <p><span className="text-[#94A3B8]">Algorithm: </span><span className="font-semibold text-[#0B1324]">InsightFace buffalo_l (ArcFace)</span></p>
-                        <p><span className="text-[#94A3B8]">Threshold: </span><span className="font-semibold text-[#0B1324]">0.65</span></p>
+                        <p><span className="text-[#94A3B8]">Threshold: </span><span className="font-semibold text-[#0B1324]">{risk.faceMatch}</span></p>
                         <p><span className="text-[#94A3B8]">Match: </span><span className={`font-semibold ${submission.faceIsMatch ? "text-emerald-600" : "text-red-600"}`}>{submission.faceIsMatch ? "Yes" : "No"}</span></p>
                       </div>
                     </div>
@@ -1033,8 +1107,7 @@ export default function SubmissionDetailPage() {
               </SectionCard>
             </div>
           )}
-        </main>
       </div>
-    </div>
+    </AdminShell>
   );
 }

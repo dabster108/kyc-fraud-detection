@@ -182,9 +182,19 @@ const startWithDocument = async (req, res) => {
     });
   } catch (err) {
     console.error("[onboarding] startWithDocument error:", err.message);
+    if (process.env.NODE_ENV !== "production") {
+      console.error(err.stack);
+    }
+    if (err.code === "VERIFIED_USER_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        code: err.code,
+        error: err.message,
+      });
+    }
     return res.status(500).json({
       success: false,
-      error: "Failed to process document",
+      error: err.message || "Failed to process document",
     });
   }
 };
@@ -235,9 +245,16 @@ const submitPersonalInfo = async (req, res) => {
     });
   } catch (err) {
     console.error("[onboarding] submitPersonalInfo error:", err.message);
+    if (err.code === "VERIFIED_USER_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        code: err.code,
+        error: err.message,
+      });
+    }
     return res.status(500).json({
       success: false,
-      error: "Failed to save personal info",
+      error: err.message || "Failed to save personal info",
     });
   }
 };
@@ -268,10 +285,21 @@ const processSelfie = async (req, res) => {
     const leftFile = req.files?.selfie_left?.[0] || null;
     const rightFile = req.files?.selfie_right?.[0] || null;
 
+    const livenessIsLive = req.body?.livenessIsLive;
     const result = await onboardingService.processSelfie(sessionId, {
       frontBuffer: frontFile.buffer,
       leftBuffer: leftFile?.buffer || null,
       rightBuffer: rightFile?.buffer || null,
+      livenessIsLive:
+        livenessIsLive === "true"
+          ? true
+          : livenessIsLive === "false"
+            ? false
+            : null,
+      livenessDecision: req.body?.livenessDecision || null,
+      livenessConfidence: req.body?.livenessConfidence
+        ? Number(req.body.livenessConfidence)
+        : null,
     });
 
     return res.json({
@@ -281,6 +309,10 @@ const processSelfie = async (req, res) => {
       isMatch: result.isMatch,
       riskFlags: result.riskFlags,
       riskScore: result.riskScore,
+      outcome: result.outcome,
+      status: result.status,
+      userMessage: result.userMessage,
+      userReason: result.userReason,
     });
   } catch (err) {
     console.error("[onboarding] processSelfie error:", err.message);

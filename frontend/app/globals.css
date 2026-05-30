@@ -7,6 +7,7 @@
   --ink: #0f172a;
   --muted: #64748b;
   --soft-border: #e2e8f0;
+  /* Single UI typeface — Lato (loaded in app/layout.js) */
   --font-body: var(--font-lato);
   --font-display: var(--font-lato);
 }
@@ -35,12 +36,20 @@
   --color-brand-600: #3ca313;
   --color-brand-700: #2f7d11;
   --color-brand-950: #0f2f08;
+  --font-sans: var(--font-lato), ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-body);
   --font-display: var(--font-display);
 }
 
 * {
   box-sizing: border-box;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display), "Segoe UI", sans-serif;
 }
 
 body {
